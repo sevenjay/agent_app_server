@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 
 from sqlalchemy import event, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -28,6 +29,21 @@ def _database_url() -> str:
 
 
 DATABASE_URL = _database_url()
+
+
+def ensure_sqlite_database_directory(database_url: str = DATABASE_URL) -> None:
+    """Create the parent directory SQLite needs before opening its database."""
+    url = make_url(database_url)
+    if not url.drivername.startswith("sqlite"):
+        return
+    if not url.database or url.database == ":memory:":
+        return
+
+    Path(url.database).expanduser().resolve().parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
 
 engine = create_async_engine(
     DATABASE_URL,
@@ -58,8 +74,7 @@ def _configure_sqlite(dbapi_connection, _connection_record) -> None:
 async def init_db() -> None:
     """Create the initial schema and verify that SQLite is using WAL."""
     database = engine.url.database
-    if database and database != ":memory:":
-        Path(database).parent.mkdir(parents=True, exist_ok=True)
+    ensure_sqlite_database_directory()
 
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
