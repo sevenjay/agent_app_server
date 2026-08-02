@@ -28,7 +28,7 @@ start main.py.
 
 Environment variables:
   DEPLOY_REMOTE              Git remote to fetch from. Default: origin
-  DEPLOY_BRANCH              Git branch to deploy. Default: master
+  DEPLOY_BRANCH              Git branch to deploy. Default: main
   DEPLOY_APP_DIR             Project directory. Default: repository root
   DEPLOY_ALLOW_DIRTY=1       Allow reset when tracked files have local changes
   DEPLOY_SKIP_GIT=1          Skip fetch/reset
@@ -178,7 +178,7 @@ main() {
 
     app_dir="${DEPLOY_APP_DIR:-$(resolve_repo_dir)}"
     remote="${DEPLOY_REMOTE:-origin}"
-    branch="${DEPLOY_BRANCH:-master}"
+    branch="${DEPLOY_BRANCH:-main}"
 
     cd "$app_dir" || die "failed to enter project directory: $app_dir"
     [[ -d .git ]] || die "project directory is not a git worktree: $app_dir"
