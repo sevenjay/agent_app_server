@@ -8,7 +8,8 @@ Codex 是對話歷史的唯一權威來源；SQLite 只保存 pin、label、最�
 > 目前的 `require_web_user` 只是預留的整合接點，不是正式的使用者驗證。development 綁定 `127.0.0.1:8080`，但目前版本庫內的 production 設定會綁定 `0.0.0.0:8080`。在補上 authentication、TLS 與受信任的存取層，或改回 loopback 以前，請勿將服務直接公開到 Internet。
 
 ## Screenshot
-<img width="1857" height="992" alt="image" src="https://github.com/user-attachments/assets/d91e297e-e6f8-4433-8528-29d5e2ca57cf" />
+<img width="1857" height="992" alt="image" src="https://github.com/user-attachments/assets/7e8daea0-36f2-4675-8fd5-0f2939d14890" />
+
 
 
 
