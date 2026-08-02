@@ -1,0 +1,216 @@
+<div class="space-y-5" data-thread-id="{{ thread.id }}">
+  <header class="flex items-start justify-between gap-4 border-b border-surface-700 pb-4">
+    <div class="min-w-0">
+      <p class="section-kicker">Conversation</p>
+      <h2 class="truncate text-xl font-semibold text-white">
+        {{ thread.custom_label or thread.name or thread.preview or "Untitled session" }}
+      </h2>
+    </div>
+    {% if active %}
+      <span class="running-badge">{{ active.status }}</span>
+    {% endif %}
+  </header>
+
+  {% for turn in thread.get("turns", []) %}
+    <section class="space-y-3" aria-label="Turn {{ turn.id }}">
+      <div class="flex items-center gap-2 font-mono text-[11px] text-slate-500">
+        <span>{{ turn.id }}</span>
+        <span>·</span>
+        <span>{{ turn.status }}</span>
+      </div>
+      {% for item in turn.get("items", []) %}
+        {% set item_type = item.get("type", "unknown") %}
+        {% if item_type == "userMessage" %}
+          <article class="message-card message-user">
+            {% for content in item.get("content", []) %}
+              <div
+                class="markdown-body"
+                data-markdown="{{ content.get("text", content.get("value", "")) }}"
+                x-html="renderMarkdown($el.dataset.markdown)"
+              ></div>
+            {% endfor %}
+          </article>
+        {% elif item_type == "agentMessage" %}
+          <article class="message-card message-agent">
+            <div
+              class="markdown-body"
+              data-markdown="{{ item.get("text", "") }}"
+              x-html="renderMarkdown($el.dataset.markdown)"
+            ></div>
+          </article>
+        {% elif item_type == "plan" %}
+          <article class="tool-card">
+            <p class="item-label">Plan</p>
+            <p class="whitespace-pre-wrap break-words text-slate-300">{{ item.get("text", "") }}</p>
+          </article>
+        {% elif item_type == "commandExecution" %}
+          <article class="tool-card overflow-hidden">
+            <div class="flex items-center justify-between gap-3">
+              <p class="item-label">Command</p>
+              <span class="font-mono text-[11px] text-slate-500">
+                {{ item.get("status", "") }}{% if item.get("exit_code") is not none %} · exit {{ item.get("exit_code") }}{% endif %}
+              </span>
+            </div>
+            <pre class="command-block">{{ item.get("command", "") }}</pre>
+            {% if item.get("aggregated_output") %}
+              <pre class="output-block">{{ item.get("aggregated_output") }}</pre>
+            {% endif %}
+          </article>
+        {% elif item_type == "fileChange" %}
+          {% set change_count = item.get("changes", [])|length %}
+          <article class="tool-card flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
+            <div class="min-w-0">
+              <p class="item-label">File changes · {{ item.get("status", "") }}</p>
+              <p class="text-sm text-slate-500">
+                {{ change_count }} file change{% if change_count != 1 %}s{% endif %} recorded. View the full diff in Latest changes.
+              </p>
+            </div>
+            <button
+              type="button"
+              class="button-secondary flex-none whitespace-nowrap"
+              aria-controls="latest-changes"
+              @click="conversationTab = 'changes'; $nextTick(() => $refs.changesTab.focus())"
+            >
+              View Latest changes <span aria-hidden="true">→</span>
+            </button>
+          </article>
+        {% elif item_type == "webSearch" %}
+          {% set action_value = item.get("action") or {} %}
+          {% set action = action_value.get("root", action_value) %}
+          <details class="tool-card">
+            <summary class="cursor-pointer item-label">{{ item_type }}</summary>
+            <dl class="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1 border-t border-surface-700 pt-2">
+              {% for field in ["type", "query", "queries", "url", "pattern"] %}
+                {% set value = action.get(field) %}
+                {% if value is not none and value != "" %}
+                  <div class="contents">
+                    <dt class="font-mono text-[10px] leading-5 text-slate-500">{{ "URL" if field == "url" else field }}</dt>
+                    <dd class="min-w-0 whitespace-pre-wrap break-words text-xs leading-5 text-slate-300">{% if field == "queries" %}{% for query in value %}{{ query }}{% if not loop.last %} · {% endif %}{% endfor %}{% else %}{{ value }}{% endif %}</dd>
+                  </div>
+                {% endif %}
+              {% endfor %}
+            </dl>
+          </details>
+        {% else %}
+          <details class="tool-card">
+            <summary class="cursor-pointer item-label">{{ item_type }}</summary>
+            <pre class="output-block">{{ item|tojson(indent=2) }}</pre>
+          </details>
+        {% endif %}
+      {% endfor %}
+    </section>
+  {% else %}
+    <div class="empty-state py-16" x-show="!liveTimelineItems.length">
+      This session has no turns yet. Connect to its stream and send the first prompt.
+    </div>
+  {% endfor %}
+
+  <template x-for="item in liveTimelineItems" :key="item.key">
+    <section
+      class="space-y-3"
+      :aria-label="item.kind === 'tool' ? `${item.tool.type || 'tool'} result` : item.kind === 'agent' ? 'Streaming assistant response' : 'Your message'"
+    >
+      <template x-if="item.kind !== 'tool'">
+        <div class="space-y-3">
+          <div
+            x-show="item.kind === 'agent'"
+            class="flex items-center gap-2 font-mono text-[11px] text-slate-500"
+          >
+            <span>Live response</span>
+            <span x-show="item.streaming" aria-hidden="true">·</span>
+            <span x-show="item.streaming" class="streaming-indicator">streaming</span>
+          </div>
+          <article
+            class="message-card"
+            :class="item.kind === 'agent' ? 'message-agent' : 'message-user'"
+            :aria-busy="item.kind === 'agent' && item.streaming"
+          >
+            <div
+              class="markdown-body live-markdown"
+              :class="{ 'streaming-markdown': item.kind === 'agent' && item.streaming }"
+              x-html="renderMarkdown(item.text)"
+            ></div>
+          </article>
+        </div>
+      </template>
+
+      <template x-if="item.kind === 'tool' && item.tool.type === 'commandExecution'">
+        <article class="tool-card overflow-hidden">
+          <div class="flex items-center justify-between gap-3">
+            <p class="item-label">Command</p>
+            <span
+              class="font-mono text-[11px] text-slate-500"
+              x-text="liveToolStatus(item.tool)"
+            ></span>
+          </div>
+          <pre class="command-block" x-text="liveToolInput(item.tool)"></pre>
+          <pre
+            x-show="liveToolOutput(item.tool)"
+            class="output-block"
+            x-text="liveToolOutput(item.tool)"
+          ></pre>
+        </article>
+      </template>
+
+      <template x-if="item.kind === 'tool' && item.tool.type === 'fileChange'">
+        <article class="tool-card flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
+          <div class="min-w-0">
+            <p class="item-label" x-text="`File changes · ${liveToolStatus(item.tool)}`"></p>
+            <p class="text-sm text-slate-500" x-text="liveFileChangeSummary(item.tool)"></p>
+          </div>
+          <button
+            type="button"
+            class="button-secondary flex-none whitespace-nowrap"
+            aria-controls="latest-changes"
+            @click="conversationTab = 'changes'; $nextTick(() => $refs.changesTab.focus())"
+          >
+            View Latest changes <span aria-hidden="true">→</span>
+          </button>
+        </article>
+      </template>
+
+      <template x-if="item.kind === 'tool' && item.tool.type === 'webSearch'">
+        <details class="tool-card" open>
+          <summary class="cursor-pointer item-label" x-text="item.tool.type"></summary>
+          <dl class="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1 border-t border-surface-700 pt-2">
+            <template x-for="entry in liveToolActionEntries(item.tool)" :key="entry.key">
+              <div class="contents">
+                <dt
+                  class="font-mono text-[10px] leading-5 text-slate-500"
+                  x-text="entry.label"
+                ></dt>
+                <dd
+                  class="min-w-0 whitespace-pre-wrap break-words text-xs leading-5 text-slate-300"
+                  x-text="entry.value"
+                ></dd>
+              </div>
+            </template>
+          </dl>
+        </details>
+      </template>
+
+      <template x-if="item.kind === 'tool' && !['commandExecution', 'fileChange', 'webSearch'].includes(item.tool.type)">
+        <details class="tool-card overflow-hidden" open>
+          <summary class="cursor-pointer item-label" x-text="item.tool.type || 'tool'"></summary>
+          <div class="flex items-center justify-end gap-3">
+            <span
+              x-show="liveToolStatus(item.tool)"
+              class="font-mono text-[11px] text-slate-500"
+              x-text="liveToolStatus(item.tool)"
+            ></span>
+          </div>
+          <pre
+            x-show="liveToolInput(item.tool)"
+            class="command-block"
+            x-text="liveToolInput(item.tool)"
+          ></pre>
+          <pre
+            x-show="liveToolOutput(item.tool)"
+            class="output-block"
+            x-text="liveToolOutput(item.tool)"
+          ></pre>
+        </details>
+      </template>
+    </section>
+  </template>
+</div>

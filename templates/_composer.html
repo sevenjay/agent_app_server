@@ -1,0 +1,110 @@
+<form
+  class="composer-shell"
+  data-thread-id="{{ thread.id }}"
+  x-init='syncThreadActive({{ thread.id|tojson }}, {{ "true" if active else "false" }}, {{ active.get("model")|tojson if active else "null" }}, {{ active.get("reasoning_effort")|tojson if active else "null" }}, {{ active.get("kind")|tojson if active else "null" }}); $watch("prompt", () => $nextTick(() => resizeComposer($refs.composerInput))); $nextTick(() => resizeComposer($refs.composerInput))'
+  @submit.prevent="submitPrompt()"
+>
+  <div class="composer-surface">
+    <label class="sr-only" for="composer-prompt">Message Codex</label>
+    <textarea
+      id="composer-prompt"
+      x-ref="composerInput"
+      x-model="prompt"
+      @input="resizeComposer($el)"
+      @keydown.meta.enter.prevent="submitPrompt()"
+      @keydown.ctrl.enter.prevent="submitPrompt()"
+      class="composer-input pretty-scrollbar"
+      rows="1"
+      maxlength="200000"
+      :placeholder="active ? (activeKind === 'goal' ? 'Steer the running goal…' : 'Steer the running turn…') : 'Describe the task, or use /goal…'"
+    ></textarea>
+
+    <div class="composer-toolbar">
+      <div class="composer-actions">
+        <button
+          x-cloak
+          x-show="active"
+          type="button"
+          class="button-danger composer-stop"
+          @click="interruptTurn()"
+        >Stop</button>
+        <div
+          class="model-settings composer-model-settings"
+          @click.away="modelSettingsOpen = false"
+          @keydown.escape.window="if (modelSettingsOpen) { modelSettingsOpen = false; $refs.settingsTrigger.focus(); }"
+        >
+          <button
+            x-ref="settingsTrigger"
+            type="button"
+            class="model-settings-trigger"
+            aria-controls="composer-model-settings-panel"
+            aria-haspopup="dialog"
+            :aria-expanded="modelSettingsOpen"
+            :title="`${selectedModelLabel} · ${selectedReasoningEffortLabel}`"
+            @click="modelSettingsOpen = !modelSettingsOpen; if (modelSettingsOpen) $nextTick(() => $refs.modelSelect.focus())"
+          >
+            <span class="model-settings-summary">
+              <span class="model-settings-model" x-text="selectedModelLabel"></span>
+              <span class="model-settings-separator" aria-hidden="true">·</span>
+              <span class="model-settings-effort" x-text="selectedReasoningEffortLabel"></span>
+            </span>
+            <span class="model-settings-chevron" :class="{ 'model-settings-chevron-open': modelSettingsOpen }" aria-hidden="true">⌄</span>
+          </button>
+          <div
+            id="composer-model-settings-panel"
+            x-cloak
+            x-show="modelSettingsOpen"
+            style="display: none;"
+            class="model-settings-popover"
+            role="dialog"
+            aria-label="Model settings"
+          >
+            <label class="model-settings-field">
+              <span class="model-settings-label">Model</span>
+              <select
+                x-ref="modelSelect"
+                class="model-select"
+                x-model="model"
+                @change="$nextTick(() => normalizeReasoningEffort())"
+                aria-label="Codex model"
+              >
+                <option value="">Default model</option>
+                <template x-for="item in models" :key="item.id || item.model">
+                  <option :value="item.model || item.id" x-text="item.display_name || item.model || item.id"></option>
+                </template>
+              </select>
+            </label>
+            <label class="model-settings-field">
+              <span class="model-settings-label">Reasoning</span>
+              <select
+                class="model-select"
+                x-model="reasoningEffort"
+                :disabled="!reasoningEffortOptions.length"
+                aria-label="Reasoning effort"
+              >
+                <option value="" x-text="defaultReasoningEffortLabel"></option>
+                <template x-for="option in reasoningEffortOptions" :key="option.value">
+                  <option
+                    :value="option.value"
+                    :title="option.description || ''"
+                    x-text="reasoningEffortOptionLabel(option)"
+                  ></option>
+                </template>
+              </select>
+            </label>
+            <p class="model-settings-hint" x-text="reasoningEffortHint"></p>
+          </div>
+        </div>
+        <button
+          type="submit"
+          class="composer-submit"
+          :disabled="busy || (!active && !streamReady) || !prompt.trim()"
+          :aria-label="active ? 'Steer' : 'Send'"
+          :title="active ? 'Steer' : 'Send'"
+        >
+          <span aria-hidden="true">↑</span>
+        </button>
+      </div>
+    </div>
+  </div>
+</form>

@@ -1,0 +1,25 @@
+.idea/
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.agents/
+
+# Runtime state
+data/
+logs/
+*.sqlite
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+*.log
+
+# Dynaconf secrets
+.secrets.toml
+
+# Frontend dependencies
+node_modules/
+
+# Local scratch/reference files
+refs/

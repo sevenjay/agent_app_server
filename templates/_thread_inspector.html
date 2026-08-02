@@ -1,0 +1,274 @@
+<div data-thread-id="{{ thread.id }}">
+  <div
+    id="plan-panel-content"
+    class="space-y-5"
+    :class="{ 'hidden lg:block': mobileTab === 'status' }"
+  >
+    {% set session_status_payload = active.status if active else thread.status|default("idle") %}
+    {% set session_status = session_status_payload %}
+    {% if session_status is mapping and session_status.get("root") is mapping %}
+      {% set session_status = session_status.get("root") %}
+    {% endif %}
+    {% if session_status is mapping %}
+      {% set session_status = session_status.get("type", "idle") %}
+    {% endif %}
+    <section x-init='syncSessionStatus({{ thread.id|tojson }}, {{ session_status_payload|tojson }})'>
+    <p class="section-kicker">Session</p>
+    <dl class="mt-3 space-y-2 text-sm">
+      <div class="flex justify-between gap-3">
+        <dt class="text-slate-500">Status</dt>
+        <dd
+          class="max-w-48 text-right"
+          x-text="sessionStatusLabel"
+          :title="sessionStatusLabel"
+          aria-live="polite"
+        >{{ session_status }}</dd>
+      </div>
+      <div class="flex justify-between gap-3">
+        <dt class="text-slate-500">Model</dt>
+        <dd
+          class="min-w-0 max-w-44 truncate text-right font-mono text-xs text-slate-300"
+          x-text="currentModelId || 'default'"
+          :title="currentModelId || 'default'"
+        >default</dd>
+      </div>
+      <div class="flex justify-between gap-3">
+        <dt class="text-slate-500">Reasoning</dt>
+        <dd
+          class="max-w-48 text-right"
+          x-text="currentReasoningEffortLabel"
+          :title="currentReasoningEffortLabel"
+        >model default</dd>
+      </div>
+      <div class="flex justify-between gap-3">
+        <dt class="text-slate-500">Turns</dt>
+        <dd>{{ thread.get("turns", [])|length }}</dd>
+      </div>
+    </dl>
+    </section>
+
+    <section
+      id="goal-panel"
+      class="border-t border-surface-700 pt-5"
+      x-init='syncGoalSnapshot({{ thread.id|tojson }}, {{ goal|tojson if goal else "null" }})'
+    >
+    <div class="flex items-center justify-between gap-3">
+      <p class="section-kicker">Goal</p>
+      <span
+        x-cloak
+        x-show="liveGoal"
+        class="goal-status-badge"
+        :class="`goal-status-${goalStatusKey}`"
+        x-text="goalStatusLabel"
+      ></span>
+    </div>
+
+    <template x-if="liveGoal">
+      <div class="goal-card" aria-live="polite">
+        <p class="goal-objective" x-text="liveGoal.objective"></p>
+        <dl class="goal-metrics">
+          <div>
+            <dt>Tokens</dt>
+            <dd>
+              <span x-text="formatTokenCount(liveGoal.tokensUsed)"></span>
+              <span x-show="liveGoal.tokenBudget" x-text="` / ${formatTokenCount(liveGoal.tokenBudget)}`"></span>
+            </dd>
+          </div>
+          <div>
+            <dt>Elapsed</dt>
+            <dd x-text="formatGoalDuration(liveGoal.timeUsedSeconds)"></dd>
+          </div>
+        </dl>
+        <div x-show="liveGoal.tokenBudget" class="goal-progress" aria-label="Goal token budget usage">
+          <span :style="`width: ${goalBudgetPercent}%`"></span>
+        </div>
+        <div class="goal-actions">
+          <button
+            x-show="liveGoal.status === 'active'"
+            type="button"
+            class="button-secondary"
+            :disabled="busy"
+            @click="pauseGoal()"
+          >Pause</button>
+          <button
+            x-show="goalCanResume"
+            type="button"
+            class="button-secondary"
+            :disabled="busy || active"
+            @click="resumeGoal()"
+          >Resume</button>
+          <button
+            type="button"
+            class="button-secondary"
+            :disabled="busy || active"
+            @click="openGoalEditor(true)"
+          >Replace</button>
+          <button
+            type="button"
+            class="button-danger"
+            :disabled="busy"
+            @click="clearGoal()"
+          >Clear</button>
+        </div>
+      </div>
+    </template>
+
+    <div x-show="!liveGoal && !goalEditorOpen" class="goal-empty">
+      <p>No long-running goal is set.</p>
+      <button type="button" class="button-secondary" @click="openGoalEditor(false)">Set goal</button>
+    </div>
+
+    <form
+      x-cloak
+      x-show="goalEditorOpen"
+      class="goal-editor"
+      @submit.prevent="startGoalFromEditor()"
+    >
+      <label>
+        <span>Objective</span>
+        <textarea
+          x-ref="goalObjective"
+          x-model="goalObjective"
+          rows="4"
+          maxlength="200000"
+          placeholder="Describe the outcome Codex should keep working toward…"
+          required
+        ></textarea>
+      </label>
+      <label>
+        <span>Token budget <small>optional</small></span>
+        <input
+          x-model="goalTokenBudget"
+          type="number"
+          min="1"
+          max="2000000000"
+          inputmode="numeric"
+          placeholder="No limit"
+        >
+      </label>
+      <div class="goal-actions">
+        <button
+          type="submit"
+          class="button-primary"
+          :disabled="busy || active || !goalObjective.trim()"
+        >Start goal</button>
+        <button type="button" class="button-secondary" @click="goalEditorOpen = false">Cancel</button>
+      </div>
+    </form>
+    </section>
+
+    <section
+      class="border-t border-surface-700 pt-5"
+      x-init='syncPlanHistory({{ thread.id|tojson }}, {{ plan_history|tojson }})'
+    >
+    <div class="flex items-center justify-between gap-3">
+      <p class="section-kicker">Plan trajectory</p>
+      <span
+        x-show="livePlans.length"
+        class="font-mono text-[10px] text-slate-500"
+        x-text="`${livePlans.length}/3`"
+      ></span>
+    </div>
+    <ol x-show="livePlans.length" class="plan-track">
+      <template x-for="(plan, index) in livePlans" :key="plan.key">
+        <li
+          class="plan-track-item"
+          :class="{ 'plan-track-item-current': index === livePlans.length - 1 }"
+        >
+          <span class="plan-track-marker" x-text="index + 1"></span>
+          <div class="plan-track-content">
+            <div class="flex items-center justify-between gap-2">
+              <span class="plan-track-label" x-text="`Revision ${index + 1}`"></span>
+              <span
+                x-show="index === livePlans.length - 1"
+                class="plan-track-current"
+              >Current</span>
+            </div>
+            <p class="plan-track-text" x-text="plan.text"></p>
+          </div>
+        </li>
+      </template>
+    </ol>
+    <p x-show="!livePlans.length" class="mt-3 text-sm text-slate-500">No plan reported.</p>
+    </section>
+  </div>
+
+  <section
+    id="usage-panel-content"
+    class="lg:mt-6 lg:border-t lg:border-surface-700 lg:pt-5"
+    :class="{ 'hidden lg:block': mobileTab !== 'status' }"
+    aria-labelledby="usage-heading"
+  >
+    <div class="flex items-center justify-between gap-3">
+      <p id="usage-heading" class="section-kicker">Usage</p>
+      <span x-cloak x-show="liveUsage" class="usage-live-badge">Live</span>
+    </div>
+    <template x-if="liveUsage">
+      <div class="mt-3 space-y-3" aria-live="polite">
+        <div class="usage-summary">
+          <div>
+            <p class="usage-label">Session total</p>
+            <p
+              class="usage-total"
+              x-text="formatTokenCount(liveUsage.total.total, true)"
+              :title="`${formatTokenCount(liveUsage.total.total)} tokens`"
+            ></p>
+            <p class="usage-unit" x-text="`${formatTokenCount(liveUsage.total.total)} tokens`"></p>
+          </div>
+          <div x-show="liveUsage.contextWindow" class="usage-context">
+            <span>Context window</span>
+            <strong x-text="formatTokenCount(liveUsage.contextWindow, true)"></strong>
+          </div>
+        </div>
+
+        <dl class="usage-grid">
+          <div class="usage-stat">
+            <dt>Input</dt>
+            <dd x-text="formatTokenCount(liveUsage.total.input)"></dd>
+          </div>
+          <div class="usage-stat">
+            <dt>Output</dt>
+            <dd x-text="formatTokenCount(liveUsage.total.output)"></dd>
+          </div>
+          <div class="usage-stat">
+            <dt>Cached input</dt>
+            <dd x-text="formatTokenCount(liveUsage.total.cachedInput)"></dd>
+          </div>
+          <div class="usage-stat">
+            <dt>Reasoning</dt>
+            <dd x-text="formatTokenCount(liveUsage.total.reasoning)"></dd>
+          </div>
+        </dl>
+
+        <div class="usage-latest">
+          <div class="flex items-baseline justify-between gap-3">
+            <p class="usage-label">Latest request</p>
+            <p class="font-mono text-sm font-semibold text-slate-200">
+              <span x-text="formatTokenCount(liveUsage.last.total)"></span>
+              <span class="text-[10px] font-normal text-slate-500">tokens</span>
+            </p>
+          </div>
+          <dl class="usage-latest-grid">
+            <div>
+              <dt>Input</dt>
+              <dd x-text="formatTokenCount(liveUsage.last.input)"></dd>
+            </div>
+            <div>
+              <dt>Output</dt>
+              <dd x-text="formatTokenCount(liveUsage.last.output)"></dd>
+            </div>
+            <div>
+              <dt>Cached</dt>
+              <dd x-text="formatTokenCount(liveUsage.last.cachedInput)"></dd>
+            </div>
+            <div>
+              <dt>Reasoning</dt>
+              <dd x-text="formatTokenCount(liveUsage.last.reasoning)"></dd>
+            </div>
+          </dl>
+        </div>
+      </div>
+    </template>
+    <p x-cloak x-show="!liveUsage" class="mt-3 text-sm text-slate-500">No live usage update reported.</p>
+  </section>
+</div>

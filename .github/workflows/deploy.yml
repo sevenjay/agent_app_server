@@ -1,0 +1,30 @@
+name: Deploy on PR Merge
+
+on:
+  pull_request:
+    types:
+      - closed
+    branches:
+      - master
+  workflow_dispatch:
+
+concurrency:
+  group: agent-app-server-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    runs-on: [self-hosted, linux, x64, agent-app-server]
+
+    steps:
+      - name: Deploy agent-app-server
+        run: |
+          set -Eeuo pipefail
+
+          sudo systemctl stop agent-app-server
+          # deploy.sh resolves the project directory from its own absolute path
+          # (/srv/agent-app-server/scripts/..), so this does not depend on the runner's cwd.
+          sudo /srv/agent-app-server/scripts/deploy.sh
+          sudo systemctl start agent-app-server
+          sudo systemctl status agent-app-server --no-pager

@@ -1,0 +1,77 @@
+<div class="space-y-2" aria-label="{{ 'Archived' if archived else 'Active' }} sessions">
+  {% for thread in threads %}
+    <div
+      class="thread-list-item"
+      :class='{ "thread-list-item-active": threadId === {{ thread.id|tojson }} }'
+      x-data="{ actionsOpen: false }"
+      @keydown.escape.window="actionsOpen = false"
+    >
+      <button
+        type="button"
+        class="thread-button"
+        @click='selectThread({{ thread.id|tojson }})'
+      >
+        <span class="flex min-w-0 items-center gap-2">
+          {% if thread.pinned %}<span title="Pinned" aria-label="Pinned">◆</span>{% endif %}
+          <span class="truncate text-sm font-medium text-slate-100">
+            {{ thread.custom_label or thread.name or thread.preview or "Untitled session" }}
+          </span>
+        </span>
+        <span
+          x-cloak
+          x-show='{{ "true" if thread.active_turn else "false" }} || isRunning({{ thread.id|tojson }})'
+          class="mt-1 self-end text-[11px] text-signal-400"
+        >running</span>
+      </button>
+
+      <div class="session-actions" @click.outside="actionsOpen = false">
+        <button
+          type="button"
+          class="session-actions-trigger"
+          aria-label="Session actions"
+          title="Session actions"
+          :aria-expanded="actionsOpen"
+          @click.stop="actionsOpen = !actionsOpen"
+        >•••</button>
+        <div
+          x-cloak
+          x-show="actionsOpen"
+          class="session-actions-menu"
+          role="menu"
+          aria-label="Session actions"
+        >
+          <div class="session-actions-info" role="presentation">
+            <p class="session-actions-info-label">Info</p>
+            <p class="session-actions-info-title">Session ID</p>
+            <code class="session-actions-info-id" title="{{ thread.id }}">{{ thread.id }}</code>
+          </div>
+          <button type="button" role="menuitem" @click.stop='actionsOpen = false; renameThread({{ thread.id|tojson }})'>Rename</button>
+          <button type="button" role="menuitem" @click.stop='actionsOpen = false; togglePin({{ "false" if thread.pinned else "true" }}, {{ thread.id|tojson }})'>
+            {{ "Unpin" if thread.pinned else "Pin" }}
+          </button>
+          <button type="button" role="menuitem" @click.stop='actionsOpen = false; forkThread({{ thread.id|tojson }})'>Fork</button>
+          {% if archived %}
+            <button type="button" role="menuitem" @click.stop='actionsOpen = false; unarchiveThread({{ thread.id|tojson }})'>Unarchive</button>
+          {% else %}
+            <button type="button" role="menuitem" class="session-actions-danger" @click.stop='actionsOpen = false; archiveThread({{ thread.id|tojson }})'>Archive</button>
+          {% endif %}
+          <div class="session-actions-divider" role="separator"></div>
+          <button type="button" role="menuitem" class="session-actions-danger" @click.stop='actionsOpen = false; deleteThread({{ thread.id|tojson }})'>Delete session</button>
+        </div>
+      </div>
+    </div>
+  {% else %}
+    <p class="empty-state">No {{ "archived " if archived else "" }}sessions in this project.</p>
+  {% endfor %}
+  {% if next_cursor %}
+    <button
+      type="button"
+      class="button-secondary mt-2 w-full"
+      hx-get="/partials/threads?project_key={{ project_key|urlencode }}&amp;archived={{ 'true' if archived else 'false' }}&amp;cursor={{ next_cursor|urlencode }}"
+      hx-target="this"
+      hx-swap="outerHTML"
+    >
+      Load more sessions
+    </button>
+  {% endif %}
+</div>

@@ -1,0 +1,43 @@
+[default]
+app_name = "agent_app_server"
+app_version = "0.1.0"
+log_level = "DEBUG"
+
+# Relative paths are resolved from the repository root.
+database_path = "../agent_app_server_data/app.db"
+database_echo = false
+
+scheduler_enabled = true
+scheduler_timezone = "Asia/Taipei"
+scheduler_health_sample_seconds = 300
+
+codex_enabled = true
+# Approval mode: "auto_review" automatically reviews elevated-permission
+# requests; "deny_all" rejects all such requests.
+codex_approval_mode = "auto_review"
+# Sandbox: "read_only" permits reads only; "workspace_write" also permits
+# writes in the workspace/writable roots; "full_access" removes restrictions.
+codex_sandbox = "workspace_write"
+codex_event_history_limit = 2000
+codex_subscriber_queue_limit = 1000
+codex_shutdown_timeout_seconds = 10
+codex_operation_timeout_seconds = 30
+codex_sse_heartbeat_seconds = 15
+codex_thread_lookup_page_limit = 50
+
+# Every real first-level directory is a Codex project. The Web console may
+# create a new project directory inside this root, but never accepts an
+# arbitrary path from the browser.
+codex_projects_root = "/home/jack/codex_workspaces"
+# Project keys or directory names excluded from the Web project selector.
+codex_hidden_projects = ["agent_app_server_data"]
+
+[development]
+web_host = "127.0.0.1"
+web_port = 8080
+trusted_hosts = ["localhost", "127.0.0.1", "testserver"]
+
+[production]
+web_host = "0.0.0.0"
+web_port = 8080
+trusted_hosts = ["localhost", "127.0.0.1", "192.168.50.234"]

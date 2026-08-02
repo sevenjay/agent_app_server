@@ -1,0 +1,17 @@
+<div class="space-y-2" aria-label="Registered projects">
+  {% for project in projects %}
+    <button
+      type="button"
+      class="project-button"
+      :class='{ "project-button-active": projectKey === {{ project.key|tojson }} }'
+      @click='selectProject({{ project.key|tojson }})'
+    >
+      <span class="truncate text-sm font-medium text-slate-100">{{ project.name }}</span>
+      <span class="mt-1 truncate font-mono text-[10px] text-slate-500" title="{{ project.path }}">
+        {{ project.path }}
+      </span>
+    </button>
+  {% else %}
+    <p class="empty-state">No projects yet. Create one with the ＋ button.</p>
+  {% endfor %}
+</div>

@@ -1,0 +1,88 @@
+<div class="latest-changes-layout" data-thread-id="{{ thread.id }}">
+  <header class="changes-heading">
+    <div class="min-w-0">
+      <p class="section-kicker">Working tree</p>
+      <h2 class="changes-title">Latest changes</h2>
+      <p class="changes-description">The most recent file updates reported for this session.</p>
+    </div>
+    <span x-cloak x-show="liveDiff" class="changes-live-badge">Live</span>
+  </header>
+
+  <section x-cloak x-show="liveDiff" aria-label="Live unified diff">
+    <dl class="diff-summary" aria-live="polite">
+      <div>
+        <dt>Files</dt>
+        <dd x-text="diffStats(liveDiff).files"></dd>
+      </div>
+      <div class="diff-summary-additions">
+        <dt>Added</dt>
+        <dd x-text="`+${diffStats(liveDiff).additions}`"></dd>
+      </div>
+      <div class="diff-summary-deletions">
+        <dt>Removed</dt>
+        <dd x-text="`−${diffStats(liveDiff).deletions}`"></dd>
+      </div>
+    </dl>
+
+    <div class="diff-view" aria-label="Unified diff content">
+      <template x-for="(line, index) in diffLines(liveDiff)" :key="`${index}-${line.text}`">
+        <div class="diff-line" :class="diffLineClass(line.kind)">
+          <span class="diff-line-number" x-text="index + 1" aria-hidden="true"></span>
+          <span class="diff-line-text" x-text="line.text || ' '"></span>
+        </div>
+      </template>
+    </div>
+  </section>
+
+  {% set diff_ns = namespace(found=false, changes=[], status="") %}
+  {% for turn in thread.get("turns", [])|reverse %}
+    {% for item in turn.get("items", [])|reverse %}
+      {% if not diff_ns.found and item.get("type", "") == "fileChange" %}
+        {% set diff_ns.found = true %}
+        {% set diff_ns.changes = item.get("changes", []) %}
+        {% set diff_ns.status = item.get("status", "") %}
+      {% endif %}
+    {% endfor %}
+  {% endfor %}
+
+  <section x-cloak x-show="!liveDiff" aria-label="Latest recorded file changes">
+    {% if diff_ns.found and diff_ns.changes %}
+      <div class="recorded-changes-summary">
+        <p>{{ diff_ns.changes|length }} file{% if diff_ns.changes|length != 1 %}s{% endif %} in the latest update</p>
+        {% if diff_ns.status %}<span>{{ diff_ns.status }}</span>{% endif %}
+      </div>
+      <ol class="recorded-changes-list">
+        {% for change in diff_ns.changes %}
+          {% if change is mapping %}
+            {% set kind = change.get("kind", "changed")|string %}
+            {% set kind_lower = kind|lower %}
+            {% set path = change.get("path", "") %}
+            <li class="recorded-change">
+              <span class="change-kind{% if kind_lower in ['add', 'added', 'create', 'created'] %} change-kind-added{% elif kind_lower in ['delete', 'deleted', 'remove', 'removed'] %} change-kind-deleted{% else %} change-kind-updated{% endif %}">
+                {{ kind }}
+              </span>
+              {% if path %}
+                <code class="change-path" title="{{ path }}">{{ path }}</code>
+              {% else %}
+                <details class="change-details">
+                  <summary>Change {{ loop.index }} details</summary>
+                  <pre>{{ change|tojson(indent=2) }}</pre>
+                </details>
+              {% endif %}
+            </li>
+          {% else %}
+            <li class="recorded-change">
+              <span class="change-kind change-kind-updated">Changed</span>
+              <code class="change-path">{{ change }}</code>
+            </li>
+          {% endif %}
+        {% endfor %}
+      </ol>
+    {% else %}
+      <div class="changes-empty-state">
+        <p>No file changes reported.</p>
+        <span>Changes will appear here when the session updates files.</span>
+      </div>
+    {% endif %}
+  </section>
+</div>

@@ -1,0 +1,12 @@
+{
+  "name": "agent-app-server",
+  "private": true,
+  "scripts": {
+    "tw:dev": "tailwindcss -i ./static/src/input.css -o ./static/css/tailwind.css --watch",
+    "tw:build": "tailwindcss -i ./static/src/input.css -o ./static/css/tailwind.css --minify"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.3.0",
+    "tailwindcss": "^4.3.0"
+  }
+}
