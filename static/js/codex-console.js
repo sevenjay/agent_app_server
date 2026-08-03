@@ -43,6 +43,7 @@ window.codexConsole = function codexConsole() {
     busy: false,
     streamReady: false,
     eventSource: null,
+    lastEventSequences: Object.create(null),
     liveEvents: [],
     liveTimelineItems: [],
     livePlans: [],
@@ -932,7 +933,16 @@ window.codexConsole = function codexConsole() {
       this.closeEvents();
       this.connectionState = "reconnecting";
       const encoded = encodeURIComponent(threadId);
-      const source = new EventSource(`/api/codex/threads/${encoded}/events`);
+      const params = new URLSearchParams();
+      const afterSequence = this.lastEventSequence(threadId);
+      if (afterSequence !== null) {
+        params.set("after_sequence", String(afterSequence));
+      }
+      const encodedParams = params.toString();
+      const query = encodedParams ? `?${encodedParams}` : "";
+      const source = new EventSource(
+        `/api/codex/threads/${encoded}/events${query}`,
+      );
       this.eventSource = source;
       source.onopen = () => {
         if (this.threadId === threadId) this.connectionState = "connected";
@@ -949,11 +959,35 @@ window.codexConsole = function codexConsole() {
           const event = JSON.parse(message.data);
           if (event.thread_id !== threadId) return;
           this.handleEvent(event);
+          this.rememberEventSequence(
+            threadId,
+            event.sequence,
+            event.type === "console.stream.resync_required",
+          );
         } catch (_error) {
           this.errorMessage = "A live event could not be decoded; refreshing history.";
           this.refreshThread().catch((error) => this.showError(error));
         }
       };
+    },
+
+    lastEventSequence(threadId) {
+      if (!Object.hasOwn(this.lastEventSequences, threadId)) return null;
+      const sequence = Number(this.lastEventSequences[threadId]);
+      return Number.isSafeInteger(sequence) && sequence >= 0 ? sequence : null;
+    },
+
+    rememberEventSequence(threadId, value, replace = false) {
+      const sequence = Number(value);
+      if (!Number.isSafeInteger(sequence) || sequence < 0) return;
+      const current = this.lastEventSequence(threadId);
+      if (replace || current === null || sequence > current) {
+        this.lastEventSequences[threadId] = sequence;
+      }
+    },
+
+    forgetEventSequence(threadId) {
+      delete this.lastEventSequences[threadId];
     },
 
     closeEvents() {
@@ -1795,6 +1829,7 @@ window.codexConsole = function codexConsole() {
         await this.api(`/api/codex/threads/${encodeURIComponent(threadId)}`, {
           method: "DELETE",
         });
+        this.forgetEventSequence(threadId);
         if (threadId === this.threadId) {
           this.threadId = "";
           this.closeEvents();

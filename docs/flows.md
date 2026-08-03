@@ -175,13 +175,14 @@ Codex Goal RPC 本身不帶 model 或 reasoning effort 欄位，因此 Web 在�
 
 ## SSE reconnect、replay 與 resync
 
-每個 Thread 都有 process-local 單調 sequence 與有限 history。SSE event 的 `id` 就是 sequence；原生 `EventSource` reconnect 時會用 `Last-Event-ID` 要求缺少的事件。
+每個 Thread 都有 process-local 單調 sequence 與有限 history。SSE event 的 `id` 就是 sequence；Browser 每成功處理一筆 event，也會在頁面記憶體內保存該 Thread 的最後 sequence。原生 `EventSource` 因網路問題自動 reconnect 時會用 `Last-Event-ID` 要求缺少的事件；使用者主動切換 Session 時會關閉舊 SSE，切回後建立帶有 `after_sequence` query cursor 的新 SSE。這份 per-Thread cursor 不寫入 SQLite 或 Browser persistent storage，重新整理頁面後仍以 Codex Thread history 重新建立基準。完整設計、邊界案例與測試對照請見 [Session event replay](session-event-replay.md)。
 
 ```mermaid
 flowchart TD
-    connect["SSE connect / reconnect"] --> auth["重新驗證 Thread 與 CWD"]
-    auth --> subscribe["依 Last-Event-ID 建立 bounded subscriber queue"]
-    subscribe --> range{"Last-Event-ID 是否存在且<br/>超出目前 replay window？"}
+    connect["SSE connect / reconnect"] --> cursor["自動重連使用 Last-Event-ID<br/>Session 切回使用 after_sequence"]
+    cursor --> auth["重新驗證 Thread 與 CWD"]
+    auth --> subscribe["依有效 cursor 建立 bounded subscriber queue"]
+    subscribe --> range{"cursor 是否存在且<br/>超出目前 replay window？"}
     range -->|否，沒有 ID| ready["送出 console.stream.ready"]
     range -->|否，仍可 replay| replay["依序 replay 較新的 events"]
     replay --> ready
@@ -197,6 +198,8 @@ flowchart TD
 ```
 
 Replay 只用來補足短暫斷線，不是持久化 event store。遇到 process restart、history gap 或 slow subscriber overflow 時，UI 必須回到 Codex Thread history 重新同步，不能把本地 live event list 當成權威資料。
+
+`Last-Event-ID` header 與 `after_sequence` 同時存在時，Backend 以 header 為準，因為它代表同一個 `EventSource` 已經在目前 URL cursor 之後成功收到的新事件。若 cursor 早於 EventHub 最舊保留事件，或 Backend restart 後 cursor 大於重新開始的 sequence，Backend 會送出 `console.stream.resync_required`。Browser 此時以事件攜帶的目前 sequence 重設該 Thread cursor、清除 transient live state，並重新讀取 Codex Thread／Goal 的 authoritative partials；同一條 SSE 隨後繼續承接較新的 live events。
 
 ## 關閉中的 Turn
 

@@ -34,6 +34,11 @@ async def test_history_gap_and_slow_subscriber_require_resync() -> None:
             event_type="codex.notification",
             method=f"event/{index}",
         )
+    boundary = await hub.subscribe("thr_1", after_sequence=1)
+    assert [event.sequence for event in boundary.initial_events] == [2, 3]
+    assert boundary.resync_required is False
+    await hub.close(boundary)
+
     stale = await hub.subscribe("thr_1", after_sequence=0)
     assert stale.resync_required is True
     await hub.close(stale)

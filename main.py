@@ -810,6 +810,7 @@ def create_app(
     async def api_thread_events(
         request: Request,
         thread_id: ThreadId,
+        after_sequence: Annotated[int | None, Query(ge=0)] = None,
     ) -> StreamingResponse:
         service = _service(request)
         request_id = _request_id(request)
@@ -823,13 +824,13 @@ def create_app(
             f"thread_id={thread_id}"
         )
         raw_last_id = request.headers.get("last-event-id")
-        after_sequence: int | None = None
+        replay_after_sequence = after_sequence
         if raw_last_id:
             try:
-                after_sequence = int(raw_last_id)
+                replay_after_sequence = int(raw_last_id)
             except ValueError as exc:
                 raise ConsoleBadRequest from exc
-            if after_sequence < 0:
+            if replay_after_sequence < 0:
                 raise ConsoleBadRequest
         heartbeat_seconds = float(
             getattr(settings, "codex_sse_heartbeat_seconds", 15)
@@ -838,11 +839,11 @@ def create_app(
         async def stream():
             LOGD(
                 f"console_sse_subscribe_start request_id={request_id} "
-                f"thread_id={thread_id} after_sequence={after_sequence}"
+                f"thread_id={thread_id} after_sequence={replay_after_sequence}"
             )
             subscription = await service.event_hub.subscribe(
                 thread_id,
-                after_sequence=after_sequence,
+                after_sequence=replay_after_sequence,
             )
             LOGD(
                 f"console_sse_subscribe_complete request_id={request_id} "

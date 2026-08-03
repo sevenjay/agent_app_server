@@ -124,6 +124,7 @@ npm run tw:build
 | [`docs/api.md`](docs/api.md) | JSON API、HTML partials、錯誤格式與 SSE endpoint 參考 |
 | [`docs/architecture.md`](docs/architecture.md) | 系統邊界、元件責任、資料權責、lifecycle 與單一 worker 限制 |
 | [`docs/flows.md`](docs/flows.md) | Project／Files／Thread 操作、Turn、Goal 與 SSE replay／resync 流程 |
+| [`docs/session-event-replay.md`](docs/session-event-replay.md) | Session 切換的 per-Thread cursor、EventHub replay window、完整 resync 與測試案例 |
 
 ## 術語約定
 

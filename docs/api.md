@@ -66,9 +66,9 @@ Goal 狀態與 usage 由 Codex Thread store 保存，不鏡像到 SQLite。Goal 
 | `POST` | `/api/codex/threads/{thread_id}/turns` | 啟動新 Turn |
 | `POST` | `/api/codex/threads/{thread_id}/steer` | 對活動 Turn／Goal 追加指示 |
 | `POST` | `/api/codex/threads/{thread_id}/interrupt` | 中止活動 Turn |
-| `GET` | `/api/codex/threads/{thread_id}/events` | 訂閱該 Thread 的 SSE stream |
+| `GET` | `/api/codex/threads/{thread_id}/events` | 訂閱該 Thread 的 SSE stream；可帶 `after_sequence` replay cursor |
 
-SSE 支援 `Last-Event-ID`、process-local bounded replay、comment heartbeat 與 `console.stream.resync_required`。Browser 收到 `console.stream.ready` 後才會啟用送出操作。詳細 reconnect 行為請見[操作流程](flows.md#sse-reconnectreplay-與-resync)。
+SSE 支援 `Last-Event-ID`、`after_sequence` query cursor、process-local bounded replay、comment heartbeat 與 `console.stream.resync_required`。同一個原生 `EventSource` 自動重連時，`Last-Event-ID` 優先於 URL 內原有的 `after_sequence`；主動切換 Session 所建立的新 `EventSource` 則以 Browser 記憶體內的 per-Thread sequence 作為 `after_sequence`。Browser 收到 `console.stream.ready` 後才會啟用送出操作。詳細 reconnect 行為請見[操作流程](flows.md#sse-reconnectreplay-與-resync)。
 
 ## HTML partials
 

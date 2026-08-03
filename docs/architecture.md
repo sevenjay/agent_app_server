@@ -73,7 +73,7 @@ flowchart LR
 | `EventHub` | Per-thread 單調 sequence、有限 replay、bounded subscriber queue | Process memory |
 | SQLAlchemy / SQLite | Pin、label、last-opened 與最後選擇等 Web UI metadata | Persistent |
 | APScheduler | 低頻 scheduler liveness sample | Process |
-| Jinja2 / HTMX / Alpine.js | Server-rendered partials、browser interaction 與目前 Thread 的 `EventSource` | Browser / request |
+| Jinja2 / HTMX / Alpine.js | Server-rendered partials、browser interaction、目前 Thread 的 `EventSource` 與 per-Thread replay cursor | Browser memory / request |
 
 ## 資料權責
 

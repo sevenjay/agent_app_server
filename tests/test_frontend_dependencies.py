@@ -64,6 +64,18 @@ def test_console_uses_local_javascript_without_application_bundler() -> None:
     assert "min-w-0" in html
 
 
+def test_session_switch_replays_from_per_thread_event_cursor() -> None:
+    javascript = Path("static/js/codex-console.js").read_text(encoding="utf-8")
+
+    assert "lastEventSequences: Object.create(null)" in javascript
+    assert 'params.set("after_sequence", String(afterSequence));' in javascript
+    assert "lastEventSequence(threadId)" in javascript
+    assert "rememberEventSequence(threadId, value, replace = false)" in javascript
+    assert 'event.type === "console.stream.resync_required"' in javascript
+    assert "if (replace || current === null || sequence > current)" in javascript
+    assert "this.forgetEventSequence(threadId);" in javascript
+
+
 def test_usage_panel_renders_structured_token_metrics() -> None:
     template = Path("templates/_thread_inspector.html").read_text(encoding="utf-8")
     javascript = Path("static/js/codex-console.js").read_text(encoding="utf-8")

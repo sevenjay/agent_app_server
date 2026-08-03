@@ -778,6 +778,62 @@ async def test_sse_response_headers_ready_event_and_cleanup() -> None:
     await response.body_iterator.aclose()
     assert await runtime.event_hub.subscriber_count() == 0
 
+    first = await runtime.event_hub.publish(
+        "thr_one",
+        event_type="codex.notification",
+        method="event/first",
+    )
+    second = await runtime.event_hub.publish(
+        "thr_one",
+        event_type="codex.notification",
+        method="event/second",
+    )
+    request_with_query_cursor = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/api/codex/threads/thr_one/events",
+            "headers": [],
+            "query_string": f"after_sequence={first.sequence}".encode(),
+            "server": ("testserver", 80),
+            "client": ("testclient", 1),
+            "scheme": "http",
+            "app": application,
+        }
+    )
+    query_replay_response = await route.endpoint(
+        request_with_query_cursor,
+        "thr_one",
+        after_sequence=first.sequence,
+    )
+    replay_chunk = await anext(query_replay_response.body_iterator)
+    assert f"id: {second.sequence}" in replay_chunk
+    assert "event/second" in replay_chunk
+    await query_replay_response.body_iterator.aclose()
+
+    request_with_header_and_query = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/api/codex/threads/thr_one/events",
+            "headers": [(b"last-event-id", str(second.sequence).encode())],
+            "query_string": f"after_sequence={first.sequence}".encode(),
+            "server": ("testserver", 80),
+            "client": ("testclient", 1),
+            "scheme": "http",
+            "app": application,
+        }
+    )
+    header_precedence_response = await route.endpoint(
+        request_with_header_and_query,
+        "thr_one",
+        after_sequence=first.sequence,
+    )
+    ready_chunk = await anext(header_precedence_response.body_iterator)
+    assert "console.stream.ready" in ready_chunk
+    assert "event/second" not in ready_chunk
+    await header_precedence_response.body_iterator.aclose()
+
     request_with_stale_id = Request(
         {
             "type": "http",
@@ -795,4 +851,26 @@ async def test_sse_response_headers_ready_event_and_cleanup() -> None:
     resync_chunk = await anext(replay_response.body_iterator)
     assert "console.stream.resync_required" in resync_chunk
     await replay_response.body_iterator.aclose()
+
+    request_with_stale_query_cursor = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/api/codex/threads/thr_one/events",
+            "headers": [],
+            "query_string": b"after_sequence=1042",
+            "server": ("testserver", 80),
+            "client": ("testclient", 1),
+            "scheme": "http",
+            "app": application,
+        }
+    )
+    stale_query_response = await route.endpoint(
+        request_with_stale_query_cursor,
+        "thr_one",
+        after_sequence=1042,
+    )
+    stale_query_chunk = await anext(stale_query_response.body_iterator)
+    assert "console.stream.resync_required" in stale_query_chunk
+    await stale_query_response.body_iterator.aclose()
     await runtime.close()
