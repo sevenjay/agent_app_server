@@ -2280,7 +2280,7 @@ window.codexConsole = function codexConsole() {
 
     liveFileChangeSummary(tool = {}) {
       const count = this.liveFileChangeCount(tool);
-      return `${count} file change${count === 1 ? "" : "s"} recorded. View the full diff in Latest changes.`;
+      return `${count} file change${count === 1 ? "" : "s"} recorded. View the full diff in Live changes.`;
     },
 
     diffLines(source) {

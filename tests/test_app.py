@@ -608,7 +608,7 @@ async def test_partials_escape_model_content_and_metadata_preferences() -> None:
         assert "outer query should stay hidden" not in timeline.text
         changes = await client.get("/partials/threads/thr_one/changes")
         assert changes.status_code == 200
-        assert "Latest changes" in changes.text
+        assert "Live changes" in changes.text
         assert "main.py" in changes.text
         assert "1 file in the latest update" in changes.text
 

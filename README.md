@@ -21,7 +21,7 @@ Web console 觀察到的對話與執行軌跡會先寫入各 Project 的 per-thr
 - **即時執行**：啟動 Turn，透過 SSE 串流 agent 訊息、tool results、plan、diff 與 usage；活動中的 Turn 可 steer 或 interrupt。
 - **Long-running Goals**：可從 Inspector 或 composer `/goal` 指令啟動、查看、暫停、恢復與清除 Goal。
 - **檔案管理**：在 Files 分頁瀏覽 Project tree、上傳／下載檔案、新增資料夾、重新命名與刪除項目。
-- **執行檢視**：Timeline、Live debug、Latest changes 與 Files 四個工作區視圖，支援桌面與手機版面。
+- **執行檢視**：Timeline、Live debug、Live changes 與 Files 四個工作區視圖，支援桌面與手機版面。
 - **Runtime 狀態**：顯示 Codex account、usage limits、模型、reasoning effort 與服務 health。
 
 ## 快速開始
@@ -86,7 +86,7 @@ scripts/run.sh
 1. 選擇既有 Project，或在 Project selector 建立新目錄。
 2. 建立新 Session，或從清單恢復既有 Codex Session。
 3. 選擇 model 與 reasoning effort 後送出 prompt。
-4. 在 Timeline 查看對話，在 Live debug 觀察事件，在 Latest changes 閱讀 diff，或在 Files 管理工作區內容。
+4. 在 Timeline 查看對話，在 Live debug 觀察事件，在 Live changes 閱讀 diff，或在 Files 管理工作區內容。
 5. 長時間工作可用 Inspector 的 Goal 控制項，或輸入 `/goal <objective>`；輸入 `/goal` 可查看目前狀態。
 
 同一個 Session 同時間只允許一個活動 Turn 或 Goal operation；不同 Sessions 可以並行執行。

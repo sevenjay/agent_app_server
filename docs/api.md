@@ -80,7 +80,7 @@ SSE 支援 `Last-Event-ID`、`after_sequence` query cursor、JSONL durable repla
 | `GET` | `/partials/threads` | Session list，支援 archived 與 cursor |
 | `GET` | `/partials/threads/{thread_id}/timeline` | Journal Timeline snapshot，根元素帶 durable cursor／coverage |
 | `GET` | `/partials/threads/{thread_id}/inspector` | Session、Goal、plan 與 usage details |
-| `GET` | `/partials/threads/{thread_id}/changes` | Latest changes／diff view |
+| `GET` | `/partials/threads/{thread_id}/changes` | Live changes／diff view |
 | `GET` | `/partials/threads/{thread_id}/composer` | Prompt composer |
 
 ## 錯誤格式

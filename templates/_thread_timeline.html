@@ -67,7 +67,7 @@
             <div class="min-w-0">
               <p class="item-label">File changes · {{ item.get("status", "") }}</p>
               <p class="text-sm text-slate-500">
-                {{ change_count }} file change{% if change_count != 1 %}s{% endif %} recorded. View the full diff in Latest changes.
+                {{ change_count }} file change{% if change_count != 1 %}s{% endif %} recorded. View the full diff in Live changes.
               </p>
             </div>
             <button
@@ -76,7 +76,7 @@
               aria-controls="latest-changes"
               @click="conversationTab = 'changes'; $nextTick(() => $refs.changesTab.focus())"
             >
-              View Latest changes <span aria-hidden="true">→</span>
+              View Live changes <span aria-hidden="true">→</span>
             </button>
           </article>
         {% elif item_type == "webSearch" %}
@@ -169,7 +169,7 @@
             aria-controls="latest-changes"
             @click="conversationTab = 'changes'; $nextTick(() => $refs.changesTab.focus())"
           >
-            View Latest changes <span aria-hidden="true">→</span>
+            View Live changes <span aria-hidden="true">→</span>
           </button>
         </article>
       </template>

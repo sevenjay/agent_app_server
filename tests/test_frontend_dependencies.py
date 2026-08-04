@@ -103,7 +103,7 @@ def test_timeline_live_debug_and_latest_changes_are_separate_tabs() -> None:
     assert 'x-show="conversationTab === \'debug\'"' in html
     assert 'id="latest-changes"' in html
     assert 'x-show="conversationTab === \'changes\'"' in html
-    assert html.index("Live debug") < html.index("Latest changes")
+    assert html.index("Live debug") < html.index("Live changes")
     assert "No live debug events yet." in html
     assert "max-h-56" not in html
     assert 'conversationTab: "timeline"' in javascript
@@ -118,7 +118,7 @@ def test_files_tab_provides_lazy_tree_and_guarded_file_operations() -> None:
     assert 'id="conversation-tab-files"' in html
     assert 'id="project-files"' in html
     assert 'x-show="conversationTab === \'files\'"' in html
-    assert html.index("Latest changes") < html.index('>\n              Files\n')
+    assert html.index("Live changes") < html.index('>\n              Files\n')
     assert "Upload files" in html
     assert "New folder" in html
     assert ">Refresh</button>" in html
@@ -152,8 +152,8 @@ def test_latest_changes_use_a_readable_diff_view() -> None:
     javascript = Path("static/js/codex-console.js").read_text(encoding="utf-8")
     tailwind = Path("static/src/input.css").read_text(encoding="utf-8")
 
-    assert "Latest changes" in template
-    assert "Latest changes" not in inspector
+    assert "Live changes" in template
+    assert "Live changes" not in inspector
     assert 'x-for="(line, index) in diffLines(liveDiff)"' in template
     assert 'class="diff-line"' in template
     assert "recorded-change" in template
@@ -166,8 +166,8 @@ def test_latest_changes_use_a_readable_diff_view() -> None:
 def test_timeline_file_changes_link_to_the_changes_tab() -> None:
     template = Path("templates/_thread_timeline.html").read_text(encoding="utf-8")
 
-    assert "View the full diff in Latest changes." in template
-    assert "View Latest changes" in template
+    assert "View the full diff in Live changes." in template
+    assert "View Live changes" in template
     assert 'aria-controls="latest-changes"' in template
     assert "conversationTab = 'changes'" in template
     assert '<pre class="diff-block">{{ change|tojson(indent=2) }}</pre>' not in template
