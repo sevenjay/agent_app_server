@@ -53,6 +53,11 @@ def test_console_uses_local_javascript_without_application_bundler() -> None:
     assert "this.busy = false;" in javascript
     assert "liveUsage" in javascript
     assert "async newProject()" in javascript
+    assert (
+        "No session is connected yet. Create or select a session to connect to Codex."
+        in javascript
+    )
+    assert 'error?.code === "codex_unavailable"' in javascript
     assert 'selected_thread_id: null' in javascript
     assert "(available[0]" not in javascript
     assert "await this.restoreThread(preferences.selected_thread_id)" in javascript

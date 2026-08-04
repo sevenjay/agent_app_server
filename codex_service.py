@@ -32,6 +32,14 @@ from turn_manager import (
 from utility.log import LOGD, LOGW
 
 
+def _is_unmaterialized_thread_error(exc: BaseException) -> bool:
+    """Return whether Codex rejected turns for a new, empty thread."""
+    if not isinstance(exc, InvalidRequestError) or exc.code != -32600:
+        return False
+    message = exc.message.lower()
+    return "not materialized yet" in message and "includeturns" in message
+
+
 class ConsoleServiceError(RuntimeError):
     status_code = 500
     code = "console_error"
@@ -249,6 +257,7 @@ class CodexService:
         *,
         operation: str,
         invalid_is_bad_request: bool = False,
+        allow_unmaterialized_thread: bool = False,
     ):
         started_at = time.perf_counter()
         LOGD(f"codex_rpc_start operation={operation}")
@@ -276,6 +285,15 @@ class CodexService:
             LOGD(f"codex_rpc_turn_state_error operation={operation} exception={type(exc).__name__}")
             raise
         except (InvalidParamsError, InvalidRequestError) as exc:
+            if (
+                allow_unmaterialized_thread
+                and _is_unmaterialized_thread_error(exc)
+            ):
+                LOGD(
+                    f"codex_rpc_unmaterialized operation={operation} "
+                    f"exception={type(exc).__name__}"
+                )
+                raise
             LOGD(
                 f"codex_rpc_invalid operation={operation} exception={type(exc).__name__} invalid_is_bad_request={invalid_is_bad_request}",
                 exc_info=True,
@@ -294,6 +312,29 @@ class CodexService:
         elapsed_ms = (time.perf_counter() - started_at) * 1000
         LOGD(f"codex_rpc_complete operation={operation} elapsed_ms={elapsed_ms:.1f}")
         return result
+
+    async def _read_thread_handle(
+        self,
+        thread: Any,
+        *,
+        include_turns: bool,
+        operation: str,
+    ) -> Any:
+        """Read a thread, treating a pre-first-message thread as empty."""
+        try:
+            return await self._call(
+                thread.read(include_turns=include_turns),
+                operation=operation,
+                allow_unmaterialized_thread=include_turns,
+            )
+        except InvalidRequestError as exc:
+            if not _is_unmaterialized_thread_error(exc):
+                raise
+            LOGD(f"codex_thread_read_without_turns operation={operation}")
+            return await self._call(
+                thread.read(include_turns=False),
+                operation=f"{operation}_without_turns",
+            )
 
     def _project(self, project_key: str) -> Project:
         try:
@@ -446,8 +487,9 @@ class CodexService:
                 ),
                 operation="thread_resume",
             )
-        response = await self._call(
-            thread.read(include_turns=include_turns),
+        response = await self._read_thread_handle(
+            thread,
+            include_turns=include_turns,
             operation="thread_read",
         )
         actual_thread = field(response, "thread")
@@ -492,8 +534,9 @@ class CodexService:
                 thread.set_name(name),
                 operation="thread_set_name",
             )
-        response = await self._call(
-            thread.read(include_turns=True),
+        response = await self._read_thread_handle(
+            thread,
+            include_turns=True,
             operation="thread_read_created",
         )
         actual = field(response, "thread")

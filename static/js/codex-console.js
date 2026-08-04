@@ -828,6 +828,7 @@ window.codexConsole = function codexConsole() {
 
     async selectThread(threadId) {
       this.modelSettingsOpen = false;
+      this.errorMessage = "";
       this.threadId = threadId;
       this.mobileTab = "chat";
       this.conversationTab = "timeline";
@@ -2414,6 +2415,15 @@ window.codexConsole = function codexConsole() {
     },
 
     showError(error) {
+      if (
+        error?.code === "codex_unavailable" &&
+        this.projectKey &&
+        !this.threadId
+      ) {
+        this.errorMessage =
+          "No session is connected yet. Create or select a session to connect to Codex.";
+        return;
+      }
       this.errorMessage = error?.message || "The request failed.";
     },
   };

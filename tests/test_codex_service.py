@@ -3,7 +3,11 @@ from pathlib import Path
 
 import pytest
 from openai_codex import ApprovalMode, Sandbox
-from openai_codex.errors import InvalidParamsError, TransportClosedError
+from openai_codex.errors import (
+    InvalidParamsError,
+    InvalidRequestError,
+    TransportClosedError,
+)
 
 import codex_service
 from codex_service import (
@@ -16,7 +20,7 @@ from codex_service import (
 )
 from event_hub import EventHub
 from projects import Project, ProjectRegistry
-from tests.fakes import FakeCodex, FakeGoalHandle
+from tests.fakes import FakeCodex, FakeGoalHandle, FakeThread
 from turn_manager import TurnManager, TurnNotActiveError
 
 
@@ -32,6 +36,45 @@ def make_service(fake: FakeCodex, project_path: Path) -> CodexService:
         sandbox=Sandbox.workspace_write,
         operation_timeout=1,
     )
+
+
+@pytest.mark.asyncio
+async def test_new_empty_thread_is_readable_before_first_message(
+    tmp_path: Path,
+) -> None:
+    class UnmaterializedThread(FakeThread):
+        async def read(self, *, include_turns: bool = False):
+            if include_turns and self.id in self.codex.unmaterialized_threads:
+                raise InvalidRequestError(
+                    -32600,
+                    f"thread {self.id} is not materialized yet; "
+                    "includeTurns is unavailable before first user message",
+                )
+            return await super().read(include_turns=include_turns)
+
+    class UnmaterializedThreadFake(FakeCodex):
+        def __init__(self, project_path: Path) -> None:
+            super().__init__(project_path)
+            self.unmaterialized_threads: set[str] = set()
+
+        async def thread_start(self, *, cwd: str, **kwargs):
+            thread = await super().thread_start(cwd=cwd, **kwargs)
+            self.unmaterialized_threads.add(thread.id)
+            return UnmaterializedThread(self, thread.id)
+
+    service = make_service(UnmaterializedThreadFake(tmp_path), tmp_path)
+
+    created = await service.create_thread(
+        project_key="agent_app_server",
+        name=None,
+        model=None,
+    )
+    read = await service.read_thread(created["id"], include_turns=True)
+
+    assert created["id"].startswith("thr_created_")
+    assert created["turns"] == []
+    assert read["id"] == created["id"]
+    assert read["turns"] == []
 
 
 @pytest.mark.asyncio
