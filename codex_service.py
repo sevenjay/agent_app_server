@@ -18,6 +18,7 @@ from event_hub import EventEnvelope, EventHub, Subscription
 from projects import Project, ProjectRegistry, UnknownProjectError
 from stream_journal import (
     StreamJournal,
+    complete_stream_turn_ids,
     history_watermark,
     materialize_timeline,
     normalize_event,
@@ -530,14 +531,19 @@ class CodexService:
         imported_watermarks = [event.get("data") for event in journal.events if event.get("type") == "history.baseline_imported"]
         if journal.coverage != "complete" or current_watermark not in imported_watermarks:
             async with self._publish_lock:
-                imported = await self.stream_journal.append_history(
-                    project.path,
-                    thread_id,
-                    history_view,
-                )
-                for appended in imported:
-                    if not appended.duplicate:
-                        await self._fan_out_record(appended.record)
+                journal = await self.stream_journal.read(project.path, thread_id)
+                imported_watermarks = [event.get("data") for event in journal.events if event.get("type") == "history.baseline_imported"]
+                if journal.coverage != "complete" or current_watermark not in imported_watermarks:
+                    skip_turn_ids = frozenset() if journal.damaged else complete_stream_turn_ids(journal)
+                    imported = await self.stream_journal.append_history(
+                        project.path,
+                        thread_id,
+                        history_view,
+                        skip_turn_ids=skip_turn_ids,
+                    )
+                    for appended in imported:
+                        if not appended.duplicate:
+                            await self._fan_out_record(appended.record)
             journal = await self.stream_journal.read(project.path, thread_id)
 
         turns, aliases = materialize_timeline(thread_id, journal)

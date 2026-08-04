@@ -118,6 +118,145 @@ async def test_disconnected_stream_survives_backend_restart_and_replays_from_dis
 
 
 @pytest.mark.asyncio
+async def test_complete_live_turn_is_not_reimported_when_history_changes(
+    tmp_path: Path,
+) -> None:
+    fake = FakeCodex(tmp_path)
+    service = service_for(fake, tmp_path)
+    thread_id = "thr_two"
+    turn_id = "turn_live"
+
+    initial = await service.snapshot_thread(thread_id)
+    assert initial["turns"] == []
+
+    for method, data in (
+        ("turn/started", {"turn_id": turn_id}),
+        (
+            "item/completed",
+            {
+                "item": {
+                    "id": "live-user",
+                    "type": "userMessage",
+                    "content": [{"type": "text", "text": "Check tomorrow's weather"}],
+                }
+            },
+        ),
+        (
+            "item/completed",
+            {
+                "item": {
+                    "id": "live-search",
+                    "type": "webSearch",
+                    "action": {"type": "search", "query": "tomorrow weather"},
+                }
+            },
+        ),
+        (
+            "item/completed",
+            {"item": {"id": "live-agent", "type": "agentMessage", "text": "Sunny."}},
+        ),
+        ("turn/completed", {"turn_id": turn_id, "status": "completed"}),
+    ):
+        await service.publish_notification(
+            thread_id,
+            method=method,
+            turn_id=turn_id,
+            data=data,
+        )
+
+    fake.threads[thread_id]["updated_at"] = 3
+    fake.threads[thread_id]["turns"] = [
+        {
+            "id": turn_id,
+            "status": "completed",
+            "items": [
+                {
+                    "id": "item-1",
+                    "type": "userMessage",
+                    "content": [{"type": "text", "text": "Check tomorrow's weather"}],
+                },
+                {
+                    "id": "live-search",
+                    "type": "webSearch",
+                    "action": {"type": "search", "query": "tomorrow weather"},
+                },
+                {"id": "item-2", "type": "agentMessage", "text": "Sunny."},
+            ],
+        }
+    ]
+    before = await service.stream_journal.read(tmp_path, thread_id)
+
+    snapshot = await service.snapshot_thread(thread_id)
+    after = await service.stream_journal.read(tmp_path, thread_id)
+    appended = [event for event in after.events if event["seq"] > before.cursor]
+
+    assert [event["type"] for event in appended] == ["history.baseline_imported"]
+    assert not [event for event in after.events if event.get("source") == "codex_history" and event.get("turn_id") == turn_id]
+    assert snapshot["journal_coverage"] == "complete"
+    assert len(snapshot["turns"]) == 1
+    assert [item["type"] for item in snapshot["turns"][0]["items"]] == [
+        "userMessage",
+        "webSearch",
+        "agentMessage",
+    ]
+    assert all(set(item["source_ids"]) == {"codex_stream"} for item in snapshot["turns"][0]["items"])
+
+
+@pytest.mark.asyncio
+async def test_history_reconciliation_imports_only_turns_missing_from_live_journal(
+    tmp_path: Path,
+) -> None:
+    fake = FakeCodex(tmp_path)
+    service = service_for(fake, tmp_path)
+    thread_id = "thr_two"
+    live_turn_id = "turn_live"
+    history_turn_id = "turn_elsewhere"
+
+    await service.snapshot_thread(thread_id)
+    for method, data in (
+        ("turn/started", {"turn_id": live_turn_id}),
+        (
+            "item/completed",
+            {"item": {"id": "live-agent", "type": "agentMessage", "text": "Observed live."}},
+        ),
+        ("turn/completed", {"turn_id": live_turn_id, "status": "completed"}),
+    ):
+        await service.publish_notification(
+            thread_id,
+            method=method,
+            turn_id=live_turn_id,
+            data=data,
+        )
+
+    fake.threads[thread_id]["updated_at"] = 3
+    fake.threads[thread_id]["turns"] = [
+        {
+            "id": live_turn_id,
+            "status": "completed",
+            "items": [{"id": "item-1", "type": "agentMessage", "text": "Observed live."}],
+        },
+        {
+            "id": history_turn_id,
+            "status": "completed",
+            "items": [{"id": "item-2", "type": "agentMessage", "text": "Created elsewhere."}],
+        },
+    ]
+
+    snapshot = await service.snapshot_thread(thread_id)
+    journal = await service.stream_journal.read(tmp_path, thread_id)
+    history_turn_ids = {event["turn_id"] for event in journal.events if event.get("source") == "codex_history" and event.get("turn_id")}
+
+    assert history_turn_ids == {history_turn_id}
+    assert [turn["id"] for turn in snapshot["turns"]] == [
+        history_turn_id,
+        live_turn_id,
+    ]
+    assert next(turn for turn in snapshot["turns"] if turn["id"] == live_turn_id)["items"][0]["source_ids"] == {
+        "codex_stream": "live-agent"
+    }
+
+
+@pytest.mark.asyncio
 async def test_partial_snapshot_merges_different_live_and_history_ids_once(
     tmp_path: Path,
 ) -> None:

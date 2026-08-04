@@ -547,6 +547,22 @@ def history_watermark(thread: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def complete_stream_turn_ids(journal: JournalRead) -> frozenset[str]:
+    """Return Turn IDs whose live stream has both lifecycle boundaries."""
+    types_by_turn: dict[str, set[str]] = defaultdict(set)
+    for event in journal.events:
+        if event.get("source") != "codex_stream":
+            continue
+        turn_id = event.get("turn_id")
+        if isinstance(turn_id, str) and turn_id:
+            types_by_turn[turn_id].add(str(event.get("type") or ""))
+    return frozenset(
+        turn_id
+        for turn_id, event_types in types_by_turn.items()
+        if "turn.started" in event_types and event_types.intersection(TERMINAL_TYPES)
+    )
+
+
 class StreamJournal:
     """One application-wide queue serializes every append across thread files."""
 
@@ -873,12 +889,17 @@ class StreamJournal:
         project_path: Path,
         thread_id: str,
         thread: dict[str, Any],
+        *,
+        skip_turn_ids: set[str] | frozenset[str] | None = None,
     ) -> list[JournalAppend]:
         appended_events = [await self.ensure_opened(project_path, thread_id)]
+        skipped = frozenset(skip_turn_ids or ())
         for turn_index, turn in enumerate(thread.get("turns", ())):
             if not isinstance(turn, dict):
                 continue
             turn_id = str(turn.get("id") or f"history-turn-{turn_index}")
+            if turn_id in skipped:
+                continue
             appended_events.append(
                 await self.append(
                     project_path,
@@ -1131,7 +1152,7 @@ def materialize_timeline(
                     == _fingerprint(comparable_payload)
                 ]
                 if ui_type in {"userMessage", "agentMessage", "plan"}:
-                    state = exact[0] if len(exact) == 1 else unmatched[0] if unmatched else None
+                    state = exact[0] if len(exact) == 1 else None
                 else:
                     state = exact_tool[0] if len(exact_tool) == 1 else None
                 if state is not None and source_id:

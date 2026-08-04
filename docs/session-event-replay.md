@@ -11,7 +11,7 @@ Web console 不再把 Codex `thread.read(include_turns=True)` 當成完整執行
 | EventHub | 已持久事件的即時 fan-out、短期相容 cache、bounded subscriber queue | 否 |
 | Browser state | 當前頁面的 live transient items 與最近 cursor | 否 |
 
-Codex history 可能沒有 command output，而且 live `msg_...` 與 history `item-N` 可能代表同一訊息卻使用不同 ID。因此 Timeline 由 Journal materialize，history 只在 coverage 不足或 watermark 更新時 backfill。
+Codex history 可能沒有 command output，而且 live `msg_...` 與 history `item-N` 可能代表同一訊息卻使用不同 ID。因此 Timeline 由 Journal materialize；history 僅 backfill Journal 缺少或 stream lifecycle 不完整的 Turn。Watermark 更新時，已有完整 live start／terminal 的 Turn 不會再次匯入。
 
 ## JSONL 與 durability
 
@@ -45,9 +45,9 @@ Coverage 逐 Turn 推導：
 - `partial`：缺 start／terminal、存在損壞或 stream gap。
 - `absent`：尚無可 materialize 的 Journal／baseline。
 
-第一次讀取舊 Session 時，Backend 將 history 以 deterministic dedup key lazy import，並追加 `history.baseline_imported` watermark。watermark 包含 updated time、Turn count 與 content fingerprint；同一 baseline 可重複請求而不重複寫入。
+第一次讀取舊 Session 時，Backend 將 history 以 deterministic dedup key lazy import，並追加 `history.baseline_imported` watermark。watermark 包含 updated time、Turn count 與 content fingerprint；同一 baseline 可重複請求而不重複寫入。後續 watermark 變更會逐 Turn reconciliation：完整 live Turn 只更新 watermark，缺少或 partial Turn 才匯入 history。
 
-Partial merge 保留 Journal command／tool activity。Message matching 依 turn、type、已知 alias、ordinal 與 normalized content；command／tool 還必須有相同 normalized payload fingerprint。無法高信心配對的項目會同時保留並標記 `unresolved`。
+Partial merge 保留 Journal command／tool activity。Message／plan 只有在同一 turn、type 下存在唯一且完全相同的 normalized content 時才建立 alias；command／tool 還必須有唯一且相同的 normalized payload fingerprint。無法高信心配對的項目會同時保留並標記 `unresolved`。
 
 Timeline item 使用 `console_item_id`，並帶有來源 alias：
 

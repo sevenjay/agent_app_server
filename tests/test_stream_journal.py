@@ -185,6 +185,7 @@ async def test_partial_history_merge_uses_aliases_and_preserves_unique_command(
         await journal.read(tmp_path, thread_id),
     )
     assert repeated_aliases == []
+    assert rebuilt[0]["status"] == "completed"
     assert rebuilt[0]["items"][1]["source_ids"] == {
         "codex_stream": "msg_live",
         "codex_history": "item-2",
@@ -233,6 +234,105 @@ async def test_live_event_merges_into_an_existing_history_baseline(tmp_path: Pat
     assert aliases[0]["target_event_id"]
     assert aliases[0]["source"] == "codex_stream"
     assert aliases[0]["source_id"] == "live-agent"
+
+
+@pytest.mark.asyncio
+async def test_message_alias_requires_unique_exact_text(tmp_path: Path) -> None:
+    journal = StreamJournal()
+    thread_id = "thr_message_mismatch"
+    turn_id = "turn_same"
+    await journal.append(
+        tmp_path,
+        thread_id,
+        event(
+            thread_id,
+            "codex.notification",
+            "item/completed",
+            {"item": {"id": "live-agent", "type": "agentMessage", "text": "Live answer"}},
+            turn_id=turn_id,
+        ),
+    )
+    await journal.append_history(
+        tmp_path,
+        thread_id,
+        {
+            "turns": [
+                {
+                    "id": turn_id,
+                    "status": "completed",
+                    "items": [
+                        {
+                            "id": "history-agent",
+                            "type": "agentMessage",
+                            "text": "Different history answer",
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+
+    turns, aliases = materialize_timeline(
+        thread_id,
+        await journal.read(tmp_path, thread_id),
+    )
+
+    assert aliases == []
+    assert turns[0]["status"] == "completed"
+    assert [item["text"] for item in turns[0]["items"]] == [
+        "Live answer",
+        "Different history answer",
+    ]
+    assert all(item["unresolved"] is True for item in turns[0]["items"])
+    assert turns[0]["items"][0]["source_ids"] == {"codex_stream": "live-agent"}
+    assert turns[0]["items"][1]["source_ids"] == {"codex_history": "history-agent"}
+
+
+@pytest.mark.asyncio
+async def test_message_alias_rejects_ambiguous_exact_text(tmp_path: Path) -> None:
+    journal = StreamJournal()
+    thread_id = "thr_message_ambiguous"
+    turn_id = "turn_same"
+    for item_id in ("live-agent-1", "live-agent-2"):
+        await journal.append(
+            tmp_path,
+            thread_id,
+            event(
+                thread_id,
+                "codex.notification",
+                "item/completed",
+                {"item": {"id": item_id, "type": "agentMessage", "text": "Repeated answer"}},
+                turn_id=turn_id,
+            ),
+        )
+    await journal.append_history(
+        tmp_path,
+        thread_id,
+        {
+            "turns": [
+                {
+                    "id": turn_id,
+                    "status": "completed",
+                    "items": [
+                        {
+                            "id": "history-agent",
+                            "type": "agentMessage",
+                            "text": "Repeated answer",
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+
+    turns, aliases = materialize_timeline(
+        thread_id,
+        await journal.read(tmp_path, thread_id),
+    )
+
+    assert aliases == []
+    assert len(turns[0]["items"]) == 3
+    assert all(item["unresolved"] is True for item in turns[0]["items"])
 
 
 @pytest.mark.asyncio
