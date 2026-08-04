@@ -28,6 +28,7 @@ window.codexConsole = function codexConsole() {
   return {
     projectKey: "",
     threadId: "",
+    appVersion: "",
     model: "",
     reasoningEffort: "",
     modelSettingsOpen: false,
@@ -246,11 +247,13 @@ window.codexConsole = function codexConsole() {
 
     async init() {
       try {
-        const [projects, preferences] = await Promise.all([
+        const [projects, preferences, status] = await Promise.all([
           this.api("/api/projects"),
           this.api("/api/preferences"),
+          this.api("/api/status"),
           this.loadModels(),
         ]);
+        this.appVersion = String(status.version || "");
         const available = projects.data || [];
         const preferred = preferences.selected_project_key;
         this.projectKey = available.some((item) => item.key === preferred)

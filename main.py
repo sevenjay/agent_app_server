@@ -192,6 +192,7 @@ async def _status_payload(
     runtime: CodexRuntime = request.app.state.codex_runtime
     return {
         "service": str(getattr(settings, "app_name", "agent_app_server")),
+        "version": str(getattr(settings, "app_version", "0.1.0")),
         "environment": str(settings.current_env),
         "time_utc": datetime.now(timezone.utc).isoformat(),
         "database": await database_status(session),

@@ -1,6 +1,6 @@
 [default]
 app_name = "agent_app_server"
-app_version = "0.1.0"
+app_version = "v0.1"
 log_level = "DEBUG"
 
 # Relative paths are resolved from the repository root.

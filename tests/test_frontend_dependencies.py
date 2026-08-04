@@ -421,12 +421,42 @@ def test_split_headers_leave_conversation_at_the_top_of_the_app_shell() -> None:
     inspector_start = html.index('<aside', conversation_start)
 
     assert html.index('<header class="app-header">', sidebar_start) < conversation_start
-    assert html.index('<header class="app-header">', inspector_start) > inspector_start
+    assert html.index('<header class="app-header inspector-header">', inspector_start) > inspector_start
     assert '<header class="app-header">' not in html[:main_start]
     assert "viewport-fit=cover" in html
     assert 'class="mobile-conversation-status lg:hidden"' in html
     assert "padding-bottom: env(safe-area-inset-bottom);" in tailwind
     assert ".panel-scroll {" in tailwind
+
+
+def test_inspector_header_is_compact_and_shows_the_application_version() -> None:
+    html = Path("static/index.html").read_text(encoding="utf-8")
+    javascript = Path("static/js/codex-console.js").read_text(encoding="utf-8")
+    tailwind = Path("static/src/input.css").read_text(encoding="utf-8")
+
+    inspector_start = html.index('<aside\n          class="inspector')
+    inspector_end = html.index("</header>", inspector_start)
+    inspector_header = html[inspector_start:inspector_end]
+
+    assert 'class="app-header inspector-header"' in inspector_header
+    assert 'class="app-version hidden lg:block"' in inspector_header
+    assert 'x-text="appVersion"' in inspector_header
+    assert "appVersion: \"\"" in javascript
+    assert 'this.api("/api/status")' in javascript
+    assert 'this.appVersion = String(status.version || "");' in javascript
+    assert ".app-header.inspector-header" not in tailwind
+    assert ".app-header {" in tailwind
+    assert "height: calc(2.75rem + env(safe-area-inset-top));" in tailwind
+    assert ".conversation-toolbar {" in tailwind
+    assert tailwind.count(
+        "height: calc(2.75rem + env(safe-area-inset-top));"
+    ) == 2
+    assert "height: calc(3.5rem + env(safe-area-inset-top));" not in tailwind
+    assert "min-height: calc(3.25rem + env(safe-area-inset-top));" not in tailwind
+    assert "height: 1.75rem;" in tailwind
+    assert "width: 1.75rem;" in tailwind
+    assert "padding: 0 0.6rem;" in tailwind
+    assert ".app-version" in tailwind
 
 
 def test_mobile_navigation_lists_sessions_before_chat() -> None:

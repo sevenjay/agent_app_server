@@ -48,11 +48,11 @@
           :class="{ 'hidden lg:flex': mobileTab !== 'sessions' }"
         >
           <header class="app-header">
-            <div class="flex min-w-0 items-center gap-3">
+            <div class="flex min-w-0 items-center gap-2">
               <div class="logo-mark" aria-hidden="true">C</div>
               <div class="min-w-0">
-                <p class="truncate text-sm font-semibold text-white">Codex Console</p>
-                <p class="truncate font-mono text-[10px] uppercase tracking-wider text-slate-500">Agent App Server</p>
+                <p class="truncate text-xs leading-4 font-semibold text-white">Codex Console</p>
+                <p class="truncate font-mono text-[9px] leading-3 uppercase tracking-wider text-slate-500">Agent App Server</p>
               </div>
             </div>
           </header>
@@ -452,11 +452,16 @@
           class="inspector min-h-0"
           :class="{ 'hidden lg:flex': mobileTab !== 'plan' && mobileTab !== 'status' }"
         >
-          <header class="app-header">
+          <header class="app-header inspector-header">
             <div class="hidden min-w-0 items-center gap-3 lg:flex">
               <span class="status-dot" :class="{ 'status-dot-off': connectionState !== 'connected' }"></span>
               <span class="truncate text-xs text-slate-500" x-text="connectionLabel"></span>
             </div>
+            <span
+              class="app-version hidden lg:block"
+              title="Application version"
+              x-text="appVersion"
+            ></span>
             <p
               class="truncate text-sm font-semibold text-white lg:hidden"
               x-text="mobileTab === 'status' ? 'Status' : 'Goal & plan'"

@@ -52,7 +52,7 @@ def test_main_initializes_logging_database_scheduler_then_web_server(
         "scheduler:start",
         "web:start",
     ]
-    assert log_messages[0].startswith("==== version 0.1.0  ")
+    assert log_messages[0].startswith(f"==== version {main.settings.app_version}  ")
     assert "env: development" in log_messages[0]
 
 

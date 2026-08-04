@@ -117,6 +117,7 @@ async def test_status_api_and_static_shell_with_codex_disabled() -> None:
             "journal_mode": "wal",
         }
         assert payload["environment"] == "development"
+        assert payload["version"] == str(main.settings.app_version)
         assert payload["scheduler"]["running"] is False
         assert payload["codex"]["enabled"] is False
         assert payload["codex"]["ready"] is False
