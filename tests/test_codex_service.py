@@ -305,6 +305,79 @@ async def test_delete_thread_accepts_rpc_failure_when_list_confirms_removal(
 
 
 @pytest.mark.asyncio
+async def test_delete_pending_thread_accepts_partial_rpc_failure_when_handle_is_gone(
+    tmp_path: Path,
+) -> None:
+    class PendingThread(FakeThread):
+        async def read(self, *, include_turns: bool = False):
+            if self.id not in self.codex.threads:
+                raise InvalidRequestError(
+                    -32600,
+                    f"thread not loaded: {self.id}",
+                )
+            return await super().read(include_turns=include_turns)
+
+    class PartiallyFailedPendingDeleteFake(FakeCodex):
+        async def thread_start(self, *, cwd: str, **kwargs):
+            thread = await super().thread_start(cwd=cwd, **kwargs)
+            return PendingThread(self, thread.id)
+
+        async def thread_delete(self, thread_id: str):
+            await super().thread_delete(thread_id)
+            raise RuntimeError("no such table: agent_jobs")
+
+    fake = PartiallyFailedPendingDeleteFake(tmp_path)
+    service = make_service(fake, tmp_path)
+    created = await service.create_thread(
+        project_key="agent_app_server",
+        name=None,
+        model=None,
+    )
+
+    deleted = await service.delete_thread(created["id"])
+
+    assert deleted["deleted"] is True
+    assert created["id"] not in fake.threads
+    listed_ids = {
+        thread["id"]
+        for thread in (await service.list_threads(project_key="agent_app_server"))[
+            "data"
+        ]
+    }
+    assert created["id"] not in listed_ids
+
+
+@pytest.mark.asyncio
+async def test_delete_pending_thread_preserves_rpc_failure_when_handle_remains(
+    tmp_path: Path,
+) -> None:
+    class FailedPendingDeleteFake(FakeCodex):
+        async def thread_delete(self, thread_id: str):
+            self.thread_delete_requests.append(thread_id)
+            raise RuntimeError("delete failed before removing thread")
+
+    fake = FailedPendingDeleteFake(tmp_path)
+    service = make_service(fake, tmp_path)
+    created = await service.create_thread(
+        project_key="agent_app_server",
+        name=None,
+        model=None,
+    )
+
+    with pytest.raises(ConsoleUnavailable):
+        await service.delete_thread(created["id"])
+
+    assert created["id"] in fake.threads
+    listed_ids = {
+        thread["id"]
+        for thread in (await service.list_threads(project_key="agent_app_server"))[
+            "data"
+        ]
+    }
+    assert created["id"] in listed_ids
+
+
+@pytest.mark.asyncio
 async def test_delete_thread_preserves_rpc_failure_when_session_still_exists(
     tmp_path: Path,
 ) -> None:

@@ -40,6 +40,13 @@ def _is_unmaterialized_thread_error(exc: BaseException) -> bool:
     return "not materialized yet" in message and "includeturns" in message
 
 
+def _is_thread_not_loaded_error(exc: BaseException) -> bool:
+    """Return whether Codex can no longer read a deleted thread handle."""
+    if not isinstance(exc, InvalidRequestError) or exc.code != -32600:
+        return False
+    return "thread not loaded" in exc.message.lower()
+
+
 class ConsoleServiceError(RuntimeError):
     status_code = 500
     code = "console_error"
@@ -258,6 +265,7 @@ class CodexService:
         operation: str,
         invalid_is_bad_request: bool = False,
         allow_unmaterialized_thread: bool = False,
+        allow_unloaded_thread: bool = False,
     ):
         started_at = time.perf_counter()
         LOGD(f"codex_rpc_start operation={operation}")
@@ -291,6 +299,12 @@ class CodexService:
             ):
                 LOGD(
                     f"codex_rpc_unmaterialized operation={operation} "
+                    f"exception={type(exc).__name__}"
+                )
+                raise
+            if allow_unloaded_thread and _is_thread_not_loaded_error(exc):
+                LOGD(
+                    f"codex_rpc_thread_not_loaded operation={operation} "
                     f"exception={type(exc).__name__}"
                 )
                 raise
@@ -731,27 +745,36 @@ class CodexService:
         except TurnConflictError as exc:
             raise ConsoleConflict from exc
         try:
-            project, _thread, _response = await self._authorized_thread(
-                thread_id,
-                include_turns=False,
-            )
-            pending = thread_id in self._pending_threads
+            pending = self._pending_threads.get(thread_id)
+            if pending is not None:
+                project = pending.project
+            else:
+                project, _thread, _response = await self._authorized_thread(
+                    thread_id,
+                    include_turns=False,
+                )
             try:
                 await self._call(
                     self._delete_thread_request(thread_id),
                     operation="thread_delete",
                 )
             except (ConsoleTimeout, ConsoleUnavailable) as delete_error:
-                if pending:
-                    raise
-                try:
-                    still_listed = await self._thread_is_listed_in_project(
-                        thread_id,
-                        project,
-                    )
-                except ConsoleServiceError:
-                    raise delete_error
-                if still_listed is not False:
+                if pending is not None:
+                    try:
+                        still_present = await self._pending_thread_is_loaded(
+                            pending.handle,
+                        )
+                    except ConsoleServiceError:
+                        raise delete_error
+                else:
+                    try:
+                        still_present = await self._thread_is_listed_in_project(
+                            thread_id,
+                            project,
+                        )
+                    except ConsoleServiceError:
+                        raise delete_error
+                if still_present is not False:
                     raise
                 LOGW(f"Codex delete reported failure after removing the session: thread_id={thread_id} project_key={project.key}")
             self._pending_threads.pop(thread_id, None)
@@ -764,6 +787,20 @@ class CodexService:
             }
         finally:
             await self.turn_manager.finish_mutation(thread_id)
+
+    async def _pending_thread_is_loaded(self, handle: Any) -> bool:
+        """Return False only when Codex explicitly reports a missing handle."""
+        try:
+            await self._call(
+                handle.read(include_turns=False),
+                operation="thread_read_delete_verify",
+                allow_unloaded_thread=True,
+            )
+        except InvalidRequestError as exc:
+            if _is_thread_not_loaded_error(exc):
+                return False
+            raise ConsoleUnavailable from exc
+        return True
 
     async def _thread_is_listed_in_project(
         self,
