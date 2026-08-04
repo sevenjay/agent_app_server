@@ -578,6 +578,12 @@ async def test_partials_escape_model_content_and_metadata_preferences() -> None:
     fake.threads["thr_one"]["turns"][0]["items"][1]["text"] = (
         "<script>alert('unsafe')</script>"
     )
+    file_change = next(
+        item
+        for item in fake.threads["thr_one"]["turns"][0]["items"]
+        if item["type"] == "fileChange"
+    )
+    file_change["changes"][0]["path"] = "src/main.py"
     fake.threads["thr_one"]["turns"][0]["items"].append(
         {
             "id": "search-1",
@@ -606,10 +612,12 @@ async def test_partials_escape_model_content_and_metadata_preferences() -> None:
         assert ">search</dd>" in timeline.text
         assert ">first query · second query</dd>" in timeline.text
         assert "outer query should stay hidden" not in timeline.text
+        assert "main.py" in timeline.text
+        assert "src/main.py" not in timeline.text
         changes = await client.get("/partials/threads/thr_one/changes")
         assert changes.status_code == 200
         assert "Live changes" in changes.text
-        assert "main.py" in changes.text
+        assert "src/main.py" in changes.text
         assert "1 file in the latest update" in changes.text
 
         saved = await client.patch(

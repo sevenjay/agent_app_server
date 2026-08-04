@@ -44,30 +44,43 @@
             ></div>
           </article>
         {% elif item_type == "plan" %}
-          <article class="tool-card">
-            <p class="item-label">Plan</p>
+          <details class="tool-card">
+            <summary class="tool-card-summary">
+              <span class="item-label">Plan</span>
+            </summary>
             <p class="whitespace-pre-wrap break-words text-slate-300">{{ item.get("text", "") }}</p>
-          </article>
+          </details>
         {% elif item_type == "commandExecution" %}
-          <article class="tool-card overflow-hidden">
-            <div class="flex items-center justify-between gap-3">
-              <p class="item-label">Command</p>
-              <span class="font-mono text-[11px] text-slate-500">
-                {{ item.get("status", "") }}{% if item.get("exit_code") is not none %} · exit {{ item.get("exit_code") }}{% endif %}
+          <details class="tool-card overflow-hidden">
+            <summary class="tool-card-summary">
+              <span class="tool-card-summary-content">
+                <span class="item-label">Command</span>
+                <span class="font-mono text-[11px] text-slate-500">
+                  {{ item.get("status", "") }}{% if item.get("exit_code") is not none %} · exit {{ item.get("exit_code") }}{% endif %}
+                </span>
               </span>
+            </summary>
+            <div>
+              <pre class="command-block">{{ item.get("command", "") }}</pre>
+              {% if item.get("aggregated_output") %}
+                <pre class="output-block">{{ item.get("aggregated_output") }}</pre>
+              {% endif %}
             </div>
-            <pre class="command-block">{{ item.get("command", "") }}</pre>
-            {% if item.get("aggregated_output") %}
-              <pre class="output-block">{{ item.get("aggregated_output") }}</pre>
-            {% endif %}
-          </article>
+          </details>
         {% elif item_type == "fileChange" %}
-          {% set change_count = item.get("changes", [])|length %}
-          <article class="tool-card flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
-            <div class="min-w-0">
-              <p class="item-label">File changes · {{ item.get("status", "") }}</p>
-              <p class="text-sm text-slate-500">
-                {{ change_count }} file change{% if change_count != 1 %}s{% endif %} recorded. View the full diff in Live changes.
+          <article class="tool-card flex items-center justify-between gap-3">
+            <div class="flex min-w-0 items-center gap-3">
+              <span class="item-label mb-0 flex-none">File changes</span>
+              <p class="min-w-0 truncate font-mono text-xs text-slate-300">
+                {% set file_ns = namespace(first=true) %}
+                {% for change in item.get("changes", []) %}
+                  {% if change is mapping %}
+                    {% set path = change.get("path", "") %}
+                  {% else %}
+                    {% set path = change|string %}
+                  {% endif %}
+                  {% if path %}{% if not file_ns.first %} · {% endif %}{{ path.rsplit("/", 1)[-1] }}{% set file_ns.first = false %}{% endif %}
+                {% endfor %}
               </p>
             </div>
             <button
@@ -83,7 +96,9 @@
           {% set action_value = item.get("action") or {} %}
           {% set action = action_value.get("root", action_value) %}
           <details class="tool-card">
-            <summary class="cursor-pointer item-label">{{ item_type }}</summary>
+            <summary class="tool-card-summary">
+              <span class="item-label">{{ item_type }}</span>
+            </summary>
             <dl class="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1 border-t border-surface-700 pt-2">
               {% for field in ["type", "query", "queries", "url", "pattern"] %}
                 {% set value = action.get(field) %}
@@ -98,7 +113,9 @@
           </details>
         {% else %}
           <details class="tool-card">
-            <summary class="cursor-pointer item-label">{{ item_type }}</summary>
+            <summary class="tool-card-summary">
+              <span class="item-label">{{ item_type }}</span>
+            </summary>
             <pre class="output-block">{{ item|tojson(indent=2) }}</pre>
           </details>
         {% endif %}
@@ -140,28 +157,35 @@
       </template>
 
       <template x-if="item.kind === 'tool' && item.tool.type === 'commandExecution'">
-        <article class="tool-card overflow-hidden">
-          <div class="flex items-center justify-between gap-3">
-            <p class="item-label">Command</p>
-            <span
-              class="font-mono text-[11px] text-slate-500"
-              x-text="liveToolStatus(item.tool)"
-            ></span>
+        <details class="tool-card overflow-hidden" open>
+          <summary class="tool-card-summary">
+            <span class="tool-card-summary-content">
+              <span class="item-label">Command</span>
+              <span
+                class="font-mono text-[11px] text-slate-500"
+                x-text="liveToolStatus(item.tool)"
+              ></span>
+            </span>
+          </summary>
+          <div>
+            <pre class="command-block" x-text="liveToolInput(item.tool)"></pre>
+            <pre
+              x-show="liveToolOutput(item.tool)"
+              class="output-block"
+              x-text="liveToolOutput(item.tool)"
+            ></pre>
           </div>
-          <pre class="command-block" x-text="liveToolInput(item.tool)"></pre>
-          <pre
-            x-show="liveToolOutput(item.tool)"
-            class="output-block"
-            x-text="liveToolOutput(item.tool)"
-          ></pre>
-        </article>
+        </details>
       </template>
 
       <template x-if="item.kind === 'tool' && item.tool.type === 'fileChange'">
-        <article class="tool-card flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
-          <div class="min-w-0">
-            <p class="item-label" x-text="`File changes · ${liveToolStatus(item.tool)}`"></p>
-            <p class="text-sm text-slate-500" x-text="liveFileChangeSummary(item.tool)"></p>
+        <article class="tool-card flex items-center justify-between gap-3">
+          <div class="flex min-w-0 items-center gap-3">
+            <span class="item-label mb-0 flex-none">File changes</span>
+            <p
+              class="min-w-0 truncate font-mono text-xs text-slate-300"
+              x-text="liveFileChangeNames(item.tool)"
+            ></p>
           </div>
           <button
             type="button"
@@ -176,7 +200,9 @@
 
       <template x-if="item.kind === 'tool' && item.tool.type === 'webSearch'">
         <details class="tool-card" open>
-          <summary class="cursor-pointer item-label" x-text="item.tool.type"></summary>
+          <summary class="tool-card-summary">
+            <span class="item-label" x-text="item.tool.type"></span>
+          </summary>
           <dl class="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1 border-t border-surface-700 pt-2">
             <template x-for="entry in liveToolActionEntries(item.tool)" :key="entry.key">
               <div class="contents">
@@ -196,7 +222,9 @@
 
       <template x-if="item.kind === 'tool' && !['commandExecution', 'fileChange', 'webSearch'].includes(item.tool.type)">
         <details class="tool-card overflow-hidden" open>
-          <summary class="cursor-pointer item-label" x-text="item.tool.type || 'tool'"></summary>
+          <summary class="tool-card-summary">
+            <span class="item-label" x-text="item.tool.type || 'tool'"></span>
+          </summary>
           <div class="flex items-center justify-end gap-3">
             <span
               x-show="liveToolStatus(item.tool)"

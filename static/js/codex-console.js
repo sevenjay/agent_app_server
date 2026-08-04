@@ -2274,13 +2274,15 @@ window.codexConsole = function codexConsole() {
         }));
     },
 
-    liveFileChangeCount(tool = {}) {
-      return Array.isArray(tool.changes) ? tool.changes.length : 0;
-    },
-
-    liveFileChangeSummary(tool = {}) {
-      const count = this.liveFileChangeCount(tool);
-      return `${count} file change${count === 1 ? "" : "s"} recorded. View the full diff in Live changes.`;
+    liveFileChangeNames(tool = {}) {
+      if (!Array.isArray(tool.changes)) return "";
+      return tool.changes
+        .map((change) => (
+          change && typeof change === "object" ? change.path : change
+        ))
+        .map((path) => String(path || "").replaceAll("\\", "/").split("/").at(-1))
+        .filter(Boolean)
+        .join(" · ");
     },
 
     diffLines(source) {

@@ -165,11 +165,15 @@ def test_latest_changes_use_a_readable_diff_view() -> None:
 
 def test_timeline_file_changes_link_to_the_changes_tab() -> None:
     template = Path("templates/_thread_timeline.html").read_text(encoding="utf-8")
+    javascript = Path("static/js/codex-console.js").read_text(encoding="utf-8")
 
-    assert "View the full diff in Live changes." in template
+    assert "View the full diff in Live changes." not in template
     assert "View Live changes" in template
     assert 'aria-controls="latest-changes"' in template
     assert "conversationTab = 'changes'" in template
+    assert 'path.rsplit("/", 1)[-1]' in template
+    assert "liveFileChangeNames(tool = {})" in javascript
+    assert '.replaceAll("\\\\", "/").split("/").at(-1)' in javascript
     assert '<pre class="diff-block">{{ change|tojson(indent=2) }}</pre>' not in template
 
 
@@ -302,6 +306,8 @@ def test_completed_tool_results_render_in_the_live_timeline() -> None:
     assert "item.kind === 'tool' && item.tool.type === 'webSearch'" in template
     assert "!['commandExecution', 'fileChange', 'webSearch'].includes(item.tool.type)" in template
     assert 'x-text="liveToolOutput(item.tool)"' in template
+    assert 'x-text="liveFileChangeNames(item.tool)"' in template
+    assert "liveFileChangeSummary" not in javascript
 
 
 def test_timeline_web_search_keeps_raw_type_and_only_formats_action() -> None:
@@ -309,8 +315,8 @@ def test_timeline_web_search_keeps_raw_type_and_only_formats_action() -> None:
     javascript = Path("static/js/codex-console.js").read_text(encoding="utf-8")
     html = Path("static/index.html").read_text(encoding="utf-8")
 
-    assert '<summary class="cursor-pointer item-label">{{ item_type }}</summary>' in template
-    assert '<summary class="cursor-pointer item-label" x-text="item.tool.type"></summary>' in template
+    assert '<span class="item-label">{{ item_type }}</span>' in template
+    assert '<span class="item-label" x-text="item.tool.type"></span>' in template
     assert 'x-for="entry in liveToolActionEntries(item.tool)"' in template
     assert "const action = tool.action?.root || tool.action;" in javascript
     assert 'const preferredOrder = ["type", "query", "queries", "url", "pattern"];' in javascript
@@ -323,15 +329,23 @@ def test_timeline_web_search_keeps_raw_type_and_only_formats_action() -> None:
     assert 'x-text="eventText(event)"' in html
 
 
-def test_collapsible_tool_cards_close_after_a_turn_ends() -> None:
+def test_tool_cards_except_file_changes_close_after_a_turn_ends() -> None:
     template = Path("templates/_thread_timeline.html").read_text(encoding="utf-8")
     javascript = Path("static/js/codex-console.js").read_text(encoding="utf-8")
+    tailwind = Path("static/src/input.css").read_text(encoding="utf-8")
 
     history = template.split('<template x-for="item in liveTimelineItems"', 1)[0]
+    assert template.count('<article class="tool-card flex items-center justify-between gap-3">') == 2
+    assert template.count('<span class="item-label mb-0 flex-none">File changes</span>') == 2
+    assert template.count('<div class="flex min-w-0 items-center gap-3">') == 2
+    assert template.count('<details class="tool-card') == 7
+    assert template.count('<summary class="tool-card-summary">') == 7
     assert '<details class="tool-card" open>' not in history
     assert '<details class="tool-card">' in history
     assert '<details class="tool-card" open>' in template
     assert '<details class="tool-card overflow-hidden" open>' in template
+    assert ".tool-card-summary" in tailwind
+    assert ".tool-card[open] > .tool-card-summary" in tailwind
     assert 'querySelectorAll("#timeline details.tool-card[open]")' in javascript
     assert "card.open = false;" in javascript
     assert javascript.count("this.collapseToolCards();") == 3

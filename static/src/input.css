@@ -438,6 +438,37 @@
     margin-bottom: 0.6rem;
   }
 
+  .tool-card-summary {
+    cursor: pointer;
+  }
+
+  .tool-card-summary::marker {
+    color: var(--color-brand-400);
+  }
+
+  .tool-card-summary-content {
+    align-items: center;
+    display: inline-flex;
+    gap: 0.75rem;
+    justify-content: space-between;
+    vertical-align: middle;
+    width: calc(100% - 1.25rem);
+  }
+
+  .tool-card > .tool-card-summary .item-label {
+    margin-bottom: 0;
+  }
+
+  .tool-card[open] > .tool-card-summary {
+    margin-bottom: 0.6rem;
+  }
+
+  .tool-card-summary:focus-visible {
+    border-radius: 0.25rem;
+    box-shadow: 0 0 0 2px var(--color-brand-400);
+    outline: none;
+  }
+
   .markdown-body {
     color: oklch(0.87 0.02 250);
     font-size: 0.875rem;
