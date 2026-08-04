@@ -2,7 +2,7 @@
 
 Agent App Server 是部署在固定 Linux 工作站上的單一使用者 Codex Web 控制台。使用者可以從桌面或手機瀏覽器管理 Project、Session 與工作區檔案，啟動 Codex Turn 或長時間 Goal，並即時查看訊息、工具輸出、plan、usage 與程式碼變更。
 
-Codex 是對話歷史的唯一權威來源；SQLite 只保存 pin、label、最近開啟時間與最後選擇等 Web UI metadata。
+Web console 觀察到的對話與執行軌跡會先寫入各 Project 的 per-thread Stream Journal；Codex history 在 Journal absent／partial 時提供 conversation fallback。SQLite 只保存 pin、label、最近開啟時間與最後選擇等 Web UI metadata。
 
 > [!WARNING]
 > 目前的 `require_web_user` 只是預留的整合接點，不是正式的使用者驗證。development 綁定 `127.0.0.1:8080`，但目前版本庫內的 production 設定會綁定 `0.0.0.0:8080`。在補上 authentication、TLS 與受信任的存取層，或改回 loopback 以前，請勿將服務直接公開到 Internet。
@@ -96,14 +96,14 @@ scripts/run.sh
 - Codex authentication 沿用服務帳號的 `~/.codex`；本應用不接受或保存 Browser 提交的 API key。
 - Project 與 Files API 只接受 server registry 產生的 `project_key` 和 project-relative path，並拒絕 path traversal、absolute path 與 symbolic link。
 - Files 分頁可以實際覆寫或刪除工作區內容；部署時應以專用 Linux user 執行，並仔細限制該帳號的檔案權限。
-- SQLite 不保存 prompt、agent response、command output、diff、token usage 或 Codex conversation mirror。
+- SQLite 不保存 prompt、agent response、command output、diff、token usage 或 Codex conversation mirror；這些受保護內容由 Project 內權限為 `0700`／`0600` 的 `.stream_journal/` JSONL 保存。
 - Trusted Host 檢查不等同 authentication。production 的網路、反向代理、TLS 與身分驗證仍由部署者負責。
 
 ## 技術概覽
 
 - Backend：Python 3.12、FastAPI、OpenAI Codex SDK、SQLAlchemy async、SQLite WAL、Alembic、APScheduler
 - Frontend：Jinja2、HTMX 2.0.4、Alpine.js 3.14.9、Tailwind CSS 4、Marked、DOMPurify
-- Live updates：原生 `EventSource` + SSE replay／resync
+- Live updates：Stream Journal durable cursor + 原生 `EventSource` SSE fan-out／replay
 - Runtime：單一 Uvicorn worker、單一 `AsyncCodex` client
 
 ## 開發檢查
@@ -124,7 +124,7 @@ npm run tw:build
 | [`docs/api.md`](docs/api.md) | JSON API、HTML partials、錯誤格式與 SSE endpoint 參考 |
 | [`docs/architecture.md`](docs/architecture.md) | 系統邊界、元件責任、資料權責、lifecycle 與單一 worker 限制 |
 | [`docs/flows.md`](docs/flows.md) | Project／Files／Thread 操作、Turn、Goal 與 SSE replay／resync 流程 |
-| [`docs/session-event-replay.md`](docs/session-event-replay.md) | Session 切換的 per-Thread cursor、EventHub replay window、完整 resync 與測試案例 |
+| [`docs/session-event-replay.md`](docs/session-event-replay.md) | Stream Journal snapshot cursor、durable replay、fallback 與 resync |
 
 ## 術語約定
 

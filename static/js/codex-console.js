@@ -48,7 +48,11 @@ window.codexConsole = function codexConsole() {
     liveTimelineItems: [],
     livePlans: [],
     liveDiff: "",
+    liveDiffSequence: null,
+    liveDiffSource: null,
     liveUsage: null,
+    liveUsageSequence: null,
+    liveUsageSource: null,
     liveGoal: null,
     goalEditorOpen: false,
     goalObjective: "",
@@ -830,7 +834,11 @@ window.codexConsole = function codexConsole() {
       this.resetLiveTimeline();
       this.livePlans = [];
       this.liveDiff = "";
+      this.liveDiffSequence = null;
+      this.liveDiffSource = null;
       this.liveUsage = null;
+      this.liveUsageSequence = null;
+      this.liveUsageSource = null;
       this.liveGoal = null;
       this.goalEditorOpen = false;
       this.goalObjective = "";
@@ -844,8 +852,8 @@ window.codexConsole = function codexConsole() {
       );
       this.streamReady = false;
       await this.savePreferences({ selected_thread_id: threadId }).catch(() => {});
-      this.connectEvents(threadId);
       await this.refreshThreadAndList();
+      if (this.threadId === threadId) this.connectEvents(threadId);
     },
 
     async refreshThread() {
@@ -855,6 +863,7 @@ window.codexConsole = function codexConsole() {
         target: "#timeline",
         swap: "innerHTML",
       });
+      this.convergeTimelineSnapshot();
       await htmx.ajax("GET", `/partials/threads/${encoded}/inspector`, {
         target: "#inspector-content",
         swap: "innerHTML",
@@ -867,6 +876,47 @@ window.codexConsole = function codexConsole() {
         target: "#composer",
         swap: "innerHTML",
       });
+    },
+
+    convergeTimelineSnapshot() {
+      if (!this.threadId) return;
+      const snapshot = document.querySelector(
+        `#timeline [data-thread-id="${CSS.escape(this.threadId)}"]`,
+      );
+      if (!snapshot) return;
+      const cursor = Number(snapshot.dataset.journalCursor);
+      if (!Number.isSafeInteger(cursor) || cursor < 0) return;
+      this.rememberEventSequence(this.threadId, cursor);
+      this.liveTimelineItems = this.liveTimelineItems.filter((item) => {
+        const sequence = Number(item.sequence);
+        return !Number.isSafeInteger(sequence) || sequence > cursor;
+      });
+      this.pendingAgentMessageDeltas = this.pendingAgentMessageDeltas.filter(
+        (segment) => {
+          const sequence = Number(segment.sequence);
+          return !Number.isSafeInteger(sequence) || sequence > cursor;
+        },
+      );
+      this.livePlans = this.livePlans.filter((plan) => {
+        const sequence = Number(plan.sequence);
+        return !Number.isSafeInteger(sequence) || sequence > cursor;
+      });
+      if (
+        Number.isSafeInteger(Number(this.liveDiffSequence)) &&
+        Number(this.liveDiffSequence) <= cursor
+      ) {
+        this.liveDiff = "";
+        this.liveDiffSequence = null;
+        this.liveDiffSource = null;
+      }
+      if (
+        Number.isSafeInteger(Number(this.liveUsageSequence)) &&
+        Number(this.liveUsageSequence) <= cursor
+      ) {
+        this.liveUsage = null;
+        this.liveUsageSequence = null;
+        this.liveUsageSource = null;
+      }
     },
 
     async refreshThreadAndList() {
@@ -1007,7 +1057,11 @@ window.codexConsole = function codexConsole() {
         this.resetLiveTimeline();
         this.livePlans = [];
         this.liveDiff = "";
+        this.liveDiffSequence = null;
+        this.liveDiffSource = null;
         this.liveUsage = null;
+        this.liveUsageSequence = null;
+        this.liveUsageSource = null;
         this.liveGoal = null;
         this.refreshThread().catch((error) => this.showError(error));
         return;
@@ -1029,13 +1083,22 @@ window.codexConsole = function codexConsole() {
         this.queueAgentMessageDelta(event);
       }
       if (event.method === "item/completed") {
+        this.recordCompletedAgentMessage(event);
         this.recordCompletedToolItem(event);
+      }
+      if (["turn/completed", "turn/error", "turn/interrupted"].includes(event.method)) {
+        this.flushQueuedAgentMessages();
+        this.finishStreamingAgentMessages(event.turn_id);
       }
       if (event.method === "turn/diff/updated") {
         this.liveDiff = event.data?.diff || "";
+        this.liveDiffSequence = Number(event.sequence);
+        this.liveDiffSource = "live";
       }
       if ((event.method || "").toLowerCase().includes("usage")) {
         this.liveUsage = this.normalizeUsage(event.data);
+        this.liveUsageSequence = Number(event.sequence);
+        this.liveUsageSource = "live";
       }
       if (event.method === "thread/status/changed") {
         const statusThreadId =
@@ -1175,7 +1238,12 @@ window.codexConsole = function codexConsole() {
         this.busy = false;
         this.errorMessage = "The long-running goal ended with an error.";
       }
-      this.queueLiveEvent(event);
+      if (this.isLiveDebugEvent(event)) this.queueLiveEvent(event);
+    },
+
+    isLiveDebugEvent(event) {
+      const type = String(event?.type || "");
+      return type === "codex.notification" || type.startsWith("console.");
     },
 
     queueLiveEvent(event) {
@@ -1187,8 +1255,8 @@ window.codexConsole = function codexConsole() {
       this.liveFlushScheduled = true;
       window.requestAnimationFrame(() => {
         this.liveEvents.push(...this.pendingLiveEvents.splice(0));
-        if (this.liveEvents.length > 300) {
-          this.liveEvents.splice(0, this.liveEvents.length - 300);
+        if (this.liveEvents.length > 1000) {
+          this.liveEvents.splice(0, this.liveEvents.length - 1000);
         }
         this.liveFlushScheduled = false;
       });
@@ -1208,6 +1276,7 @@ window.codexConsole = function codexConsole() {
         itemId: String(itemId),
         turnId: String(turnId),
         delta: data.delta,
+        sequence: Number(event.sequence),
       });
       if (this.agentMessageFlushFrame !== null) return;
 
@@ -1231,9 +1300,14 @@ window.codexConsole = function codexConsole() {
             turnId: segment.turnId,
             text: segment.delta,
             streaming: true,
+            sequence: segment.sequence,
           });
         } else {
           this.liveTimelineItems[index].text += segment.delta;
+          this.liveTimelineItems[index].sequence = Math.max(
+            Number(this.liveTimelineItems[index].sequence) || 0,
+            Number(segment.sequence) || 0,
+          );
         }
       }
 
@@ -1282,6 +1356,7 @@ window.codexConsole = function codexConsole() {
         itemId,
         turnId,
         tool: { ...item },
+        sequence: Number(event.sequence),
       };
       const index = this.liveTimelineItems.findIndex(
         (candidate) => candidate.key === key,
@@ -1296,6 +1371,45 @@ window.codexConsole = function codexConsole() {
         this.liveTimelineItems.splice(index, 1, liveItem);
       }
       if (shouldPin) this.scrollTimelineToBottom();
+    },
+
+    recordCompletedAgentMessage(event) {
+      const data = event.data || {};
+      const item = data.item?.root || data.item;
+      const itemType = item?.type || data.item_type || data.itemType;
+      if (itemType !== "agentMessage") return;
+      const itemId = String(item?.id || data.item_id || data.itemId || "");
+      if (!itemId) return;
+      const turnId = String(event.turn_id || data.turn_id || data.turnId || "");
+      const text = String(item?.text || data.text || "");
+      this.flushQueuedAgentMessages();
+      let index = this.liveTimelineItems.findIndex(
+        (candidate) => (
+          candidate.kind === "agent" &&
+          candidate.itemId === itemId &&
+          candidate.turnId === turnId
+        ),
+      );
+      if (index === -1) {
+        this.liveTimelineItems.push({
+          key: `${turnId}:${itemId}:${this.liveResponseSegment}`,
+          kind: "agent",
+          itemId,
+          turnId,
+          text,
+          streaming: false,
+          sequence: Number(event.sequence),
+        });
+        index = this.liveTimelineItems.length - 1;
+      } else {
+        this.liveTimelineItems[index] = {
+          ...this.liveTimelineItems[index],
+          text,
+          streaming: false,
+          sequence: Number(event.sequence),
+        };
+      }
+      this.liveResponseSegment += 1;
     },
 
     isToolTimelineItem(item) {
@@ -1349,11 +1463,17 @@ window.codexConsole = function codexConsole() {
         });
     },
 
-    bindLiveMessageToTurn(key, turnId) {
+    bindLiveMessageToTurn(key, turnId, sequence = null) {
       const normalizedTurnId = String(turnId || "");
       if (!normalizedTurnId) return;
       const item = this.liveTimelineItems.find((candidate) => candidate.key === key);
-      if (item) item.turnId = normalizedTurnId;
+      if (item) {
+        item.turnId = normalizedTurnId;
+        const durableSequence = Number(sequence);
+        if (Number.isSafeInteger(durableSequence) && durableSequence >= 0) {
+          item.sequence = durableSequence;
+        }
+      }
     },
 
     bindPendingUserMessagesToTurn(turnId) {
@@ -1483,7 +1603,11 @@ window.codexConsole = function codexConsole() {
             }),
           },
         );
-        this.bindLiveMessageToTurn(messageKey, result.turn_id);
+        this.bindLiveMessageToTurn(
+          messageKey,
+          result.turn_id,
+          result.journal_cursor,
+        );
       } catch (error) {
         this.removeLiveMessage(messageKey);
         this.markRunning(threadId, false);
@@ -1734,7 +1858,11 @@ window.codexConsole = function codexConsole() {
             body: JSON.stringify({ prompt: text }),
           },
         );
-        this.bindLiveMessageToTurn(messageKey, result.turn_id);
+        this.bindLiveMessageToTurn(
+          messageKey,
+          result.turn_id,
+          result.journal_cursor,
+        );
       } catch (error) {
         this.removeLiveMessage(messageKey);
         if (this.threadId === threadId) this.prompt = text;
@@ -1875,7 +2003,11 @@ window.codexConsole = function codexConsole() {
       this.resetLiveTimeline();
       this.livePlans = [];
       this.liveDiff = "";
+      this.liveDiffSequence = null;
+      this.liveDiffSource = null;
       this.liveUsage = null;
+      this.liveUsageSequence = null;
+      this.liveUsageSource = null;
       this.liveGoal = null;
       this.goalEditorOpen = false;
       this.goalObjective = "";
@@ -2000,6 +2132,7 @@ window.codexConsole = function codexConsole() {
         {
           key: `live-plan-${event.sequence ?? this.eventCounter++}`,
           text,
+          sequence: Number(event.sequence),
         },
       ]);
     },
@@ -2012,9 +2145,37 @@ window.codexConsole = function codexConsole() {
         const text = String(plan?.text || "").trim();
         if (!text || seen.has(text)) continue;
         seen.add(text);
-        recent.unshift({ key: plan.key, text });
+        recent.unshift({ key: plan.key, text, sequence: plan.sequence });
       }
       return recent.slice(-3);
+    },
+
+    syncDiffSnapshot(threadId, diff, cursor) {
+      if (this.threadId !== threadId) return;
+      const snapshotCursor = Number(cursor);
+      const liveSequence = Number(this.liveDiffSequence);
+      if (
+        Number.isSafeInteger(liveSequence) &&
+        Number.isSafeInteger(snapshotCursor) &&
+        liveSequence > snapshotCursor
+      ) return;
+      this.liveDiff = String(diff || "");
+      this.liveDiffSequence = null;
+      this.liveDiffSource = this.liveDiff ? "journal" : null;
+    },
+
+    syncUsageSnapshot(threadId, usage, cursor) {
+      if (this.threadId !== threadId) return;
+      const snapshotCursor = Number(cursor);
+      const liveSequence = Number(this.liveUsageSequence);
+      if (
+        Number.isSafeInteger(liveSequence) &&
+        Number.isSafeInteger(snapshotCursor) &&
+        liveSequence > snapshotCursor
+      ) return;
+      this.liveUsage = usage ? this.normalizeUsage(usage) : null;
+      this.liveUsageSequence = null;
+      this.liveUsageSource = this.liveUsage ? "journal" : null;
     },
 
     formatPlanUpdate(data = {}) {

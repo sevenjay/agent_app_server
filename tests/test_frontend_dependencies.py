@@ -208,6 +208,36 @@ def test_agent_message_deltas_stream_into_timeline() -> None:
     assert "streaming-markdown::after" in tailwind
 
 
+def test_timeline_snapshot_cursor_converges_before_sse_connection() -> None:
+    template = Path("templates/_thread_timeline.html").read_text(encoding="utf-8")
+    javascript = Path("static/js/codex-console.js").read_text(encoding="utf-8")
+
+    assert 'data-journal-cursor="{{ thread.get(\'journal_cursor\', 0) }}"' in template
+    assert 'data-journal-coverage="{{ thread.get(\'journal_coverage\', \'absent\') }}"' in template
+    assert "this.convergeTimelineSnapshot();" in javascript
+    assert "sequence > cursor" in javascript
+    assert "result.journal_cursor" in javascript
+    assert "syncDiffSnapshot" in javascript
+    assert "syncUsageSnapshot" in javascript
+    convergence = javascript.split("convergeTimelineSnapshot()", 1)[1].split(
+        "async refreshThreadAndList()",
+        1,
+    )[0]
+    assert "this.liveEvents =" not in convergence
+    assert "this.pendingLiveEvents =" not in convergence
+    assert "this.liveEvents.length > 1000" in javascript
+    assert "this.liveEvents.length - 1000" in javascript
+    assert 'type === "codex.notification" || type.startsWith("console.")' in javascript
+    assert "if (this.isLiveDebugEvent(event)) this.queueLiveEvent(event);" in javascript
+    select_thread = javascript.split("async selectThread(threadId)", 1)[1].split(
+        "async refreshThread()",
+        1,
+    )[0]
+    assert select_thread.index("await this.refreshThreadAndList()") < select_thread.index(
+        "this.connectEvents(threadId)"
+    )
+
+
 def test_goal_completion_reconciles_live_responses_with_persisted_history() -> None:
     javascript = Path("static/js/codex-console.js").read_text(encoding="utf-8")
     goal_idle = javascript.split('event.type === "console.goal.idle"', 1)[1].split(

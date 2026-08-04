@@ -4,24 +4,31 @@ from __future__ import annotations
 
 import asyncio
 import time
+import uuid
 from dataclasses import dataclass
 from typing import Any
 
 from openai_codex import ApprovalMode, Sandbox
 from openai_codex.errors import InvalidParamsError, InvalidRequestError
 from openai_codex.generated.v2_all import ThreadDeleteParams, ThreadDeleteResponse
-from utility.log import LOGD, LOGW
 
 from codex_goal_adapter import CodexGoalAdapter
 from codex_serializers import field, notification_view, thread_view, to_primitive
-from event_hub import EventHub
+from event_hub import EventEnvelope, EventHub, Subscription
 from projects import Project, ProjectRegistry, UnknownProjectError
+from stream_journal import (
+    StreamJournal,
+    history_watermark,
+    materialize_timeline,
+    normalize_event,
+)
 from turn_manager import (
     TurnConflictError,
     TurnManager,
     TurnNotActiveError,
     TurnsUnavailableError,
 )
+from utility.log import LOGD, LOGW
 
 
 class ConsoleServiceError(RuntimeError):
@@ -92,6 +99,7 @@ class CodexService:
         turn_manager: TurnManager,
         approval_mode: ApprovalMode,
         sandbox: Sandbox,
+        stream_journal: StreamJournal | None = None,
         goal_adapter: Any | None = None,
         operation_timeout: float = 30,
         lookup_page_limit: int = 50,
@@ -102,10 +110,102 @@ class CodexService:
         self.turn_manager = turn_manager
         self.approval_mode = approval_mode
         self.sandbox = sandbox
+        self.stream_journal = stream_journal or StreamJournal()
         self.goal_adapter = goal_adapter or CodexGoalAdapter(codex)
         self.operation_timeout = operation_timeout
         self.lookup_page_limit = lookup_page_limit
         self._pending_threads: dict[str, _PendingThread] = {}
+        self._thread_projects: dict[str, Project] = {}
+        self._publish_lock = asyncio.Lock()
+        self._recent_stream_fingerprints: dict[str, tuple[str, float]] = {}
+
+    async def _fan_out_record(self, record: dict[str, Any]) -> EventEnvelope | None:
+        thread_id = str(record["thread_id"])
+        sequence = int(record["seq"])
+        if sequence <= await self.event_hub.current_sequence(thread_id):
+            return None
+        return await self.event_hub.publish(
+            thread_id,
+            event_type=str(record.get("event_type") or "codex.notification"),
+            method=str(record.get("method") or record.get("type") or "unknown"),
+            data=dict(record.get("data") or {}),
+            turn_id=(str(record["turn_id"]) if record.get("turn_id") else None),
+            sequence=sequence,
+        )
+
+    async def _publish(
+        self,
+        thread_id: str,
+        *,
+        event_type: str,
+        method: str,
+        data: dict[str, Any] | None = None,
+        turn_id: str | None = None,
+        dedup_key: str | None = None,
+        channel: str = "console",
+    ) -> EventEnvelope | None:
+        """Persist one normalized event before exposing its sequence to SSE."""
+        async with self._publish_lock:
+            project = self._thread_projects.get(thread_id)
+            if project is None:
+                project, _thread = await self._find_thread(thread_id)
+                self._thread_projects[thread_id] = project
+            opened = await self.stream_journal.ensure_opened(project.path, thread_id)
+            if not opened.duplicate:
+                await self._fan_out_record(opened.record)
+            normalized = normalize_event(
+                thread_id=thread_id,
+                event_type=event_type,
+                method=method,
+                data=data,
+                turn_id=turn_id,
+                dedup_key=dedup_key,
+            )
+            if normalized is None:
+                return None
+            fingerprint = normalized.get("notification_fingerprint")
+            if isinstance(fingerprint, str) and fingerprint:
+                now = time.monotonic()
+                previous = self._recent_stream_fingerprints.get(fingerprint)
+                if previous is not None and previous[0] != channel and now - previous[1] <= 5:
+                    return None
+                self._recent_stream_fingerprints[fingerprint] = (channel, now)
+                if len(self._recent_stream_fingerprints) > 2_000:
+                    cutoff = now - 10
+                    self._recent_stream_fingerprints = {
+                        key: value for key, value in self._recent_stream_fingerprints.items() if value[1] >= cutoff
+                    }
+            appended = await self.stream_journal.append(
+                project.path,
+                thread_id,
+                normalized,
+            )
+            if appended.duplicate:
+                return None
+            return await self._fan_out_record(appended.record)
+
+    async def publish_notification(
+        self,
+        thread_id: str,
+        *,
+        method: str,
+        data: dict[str, Any],
+        turn_id: str | None = None,
+        channel: str = "global",
+    ) -> EventEnvelope | None:
+        if turn_id is None:
+            turn_id = str(data.get("turn_id") or data.get("turnId") or "") or None
+        if turn_id is None:
+            active = await self.turn_manager.current(thread_id)
+            turn_id = active.turn_id if active is not None else None
+        return await self._publish(
+            thread_id,
+            event_type="codex.notification",
+            method=method,
+            data=data,
+            turn_id=turn_id,
+            channel=channel,
+        )
 
     def _remember_pending_thread(
         self,
@@ -117,10 +217,7 @@ class CodexService:
         thread_id = str(view.get("id", ""))
         handle_id = str(field(handle, "id", ""))
         if not thread_id or handle_id != thread_id:
-            LOGD(
-                f"codex_pending_thread_rejected view_thread_id={thread_id or 'missing'} "
-                f"handle_matches={handle_id == thread_id}"
-            )
+            LOGD(f"codex_pending_thread_rejected view_thread_id={thread_id or 'missing'} handle_matches={handle_id == thread_id}")
             raise ConsoleUnavailable
         self._pending_threads[thread_id] = _PendingThread(
             project=project,
@@ -128,10 +225,8 @@ class CodexService:
             view=view,
             archived=bool(view.get("archived", False)),
         )
-        LOGD(
-            f"codex_pending_thread_registered thread_id={thread_id} "
-            f"project_key={project.key}"
-        )
+        self._thread_projects[thread_id] = project
+        LOGD(f"codex_pending_thread_registered thread_id={thread_id} project_key={project.key}")
 
     def _refresh_pending_thread(
         self,
@@ -163,39 +258,25 @@ class CodexService:
             )
         except asyncio.CancelledError:
             elapsed_ms = (time.perf_counter() - started_at) * 1000
-            LOGD(
-                f"codex_rpc_cancelled operation={operation} "
-                f"elapsed_ms={elapsed_ms:.1f}"
-            )
+            LOGD(f"codex_rpc_cancelled operation={operation} elapsed_ms={elapsed_ms:.1f}")
             raise
         except TimeoutError as exc:
             elapsed_ms = (time.perf_counter() - started_at) * 1000
-            LOGD(
-                f"codex_rpc_timeout operation={operation} "
-                f"elapsed_ms={elapsed_ms:.1f}"
-            )
+            LOGD(f"codex_rpc_timeout operation={operation} elapsed_ms={elapsed_ms:.1f}")
             raise ConsoleTimeout from exc
         except ConsoleServiceError as exc:
-            LOGD(
-                f"codex_rpc_console_error operation={operation} "
-                f"exception={type(exc).__name__}"
-            )
+            LOGD(f"codex_rpc_console_error operation={operation} exception={type(exc).__name__}")
             raise
         except (
             TurnConflictError,
             TurnNotActiveError,
             TurnsUnavailableError,
         ) as exc:
-            LOGD(
-                f"codex_rpc_turn_state_error operation={operation} "
-                f"exception={type(exc).__name__}"
-            )
+            LOGD(f"codex_rpc_turn_state_error operation={operation} exception={type(exc).__name__}")
             raise
         except (InvalidParamsError, InvalidRequestError) as exc:
             LOGD(
-                f"codex_rpc_invalid operation={operation} "
-                f"exception={type(exc).__name__} "
-                f"invalid_is_bad_request={invalid_is_bad_request}",
+                f"codex_rpc_invalid operation={operation} exception={type(exc).__name__} invalid_is_bad_request={invalid_is_bad_request}",
                 exc_info=True,
             )
             LOGW(f"Codex operation rejected invalid parameters: {type(exc).__name__}")
@@ -204,8 +285,7 @@ class CodexService:
             raise ConsoleUnavailable from exc
         except Exception as exc:
             LOGD(
-                f"codex_rpc_failed operation={operation} "
-                f"exception={type(exc).__name__}",
+                f"codex_rpc_failed operation={operation} exception={type(exc).__name__}",
                 exc_info=True,
             )
             LOGW(f"Codex operation failed: {type(exc).__name__}")
@@ -245,10 +325,7 @@ class CodexService:
         limit: int = 30,
     ) -> dict[str, Any]:
         project = self._project(project_key)
-        LOGD(
-            f"codex_thread_list_start project_key={project.key} "
-            f"archived={archived} cursor_present={cursor is not None} limit={limit}"
-        )
+        LOGD(f"codex_thread_list_start project_key={project.key} archived={archived} cursor_present={cursor is not None} limit={limit}")
         response = await self._call(
             self.codex.thread_list(
                 archived=archived,
@@ -268,25 +345,17 @@ class CodexService:
         discovered_pending_ids = listed_ids.intersection(self._pending_threads)
         for thread_id in discovered_pending_ids:
             self._pending_threads.pop(thread_id, None)
-            LOGD(
-                f"codex_pending_thread_discovered thread_id={thread_id} "
-                f"project_key={project.key}"
-            )
+            LOGD(f"codex_pending_thread_discovered thread_id={thread_id} project_key={project.key}")
 
         pending_views: list[dict[str, Any]] = []
         if cursor is None:
             pending_views = [
                 dict(pending.view)
                 for pending in reversed(tuple(self._pending_threads.values()))
-                if pending.project == project
-                and pending.archived is archived
-                and str(pending.view["id"]) not in listed_ids
+                if pending.project == project and pending.archived is archived and str(pending.view["id"]) not in listed_ids
             ]
             if pending_views:
-                LOGD(
-                    f"codex_thread_list_pending_merged project_key={project.key} "
-                    f"archived={archived} pending_count={len(pending_views)}"
-                )
+                LOGD(f"codex_thread_list_pending_merged project_key={project.key} archived={archived} pending_count={len(pending_views)}")
         threads = [*pending_views, *threads]
         payload = {
             "data": threads,
@@ -303,17 +372,12 @@ class CodexService:
     async def _find_thread(self, thread_id: str) -> tuple[Project, Any]:
         pending = self._pending_threads.get(thread_id)
         if pending is not None:
-            LOGD(
-                f"codex_thread_lookup_pending thread_id={thread_id} "
-                f"project_key={pending.project.key}"
-            )
+            LOGD(f"codex_thread_lookup_pending thread_id={thread_id} project_key={pending.project.key}")
+            self._thread_projects[thread_id] = pending.project
             return pending.project, pending.handle
 
         scanned_pages = 0
-        LOGD(
-            f"codex_thread_lookup_start thread_id={thread_id} "
-            f"project_count={len(self.registry)}"
-        )
+        LOGD(f"codex_thread_lookup_start thread_id={thread_id} project_count={len(self.registry)}")
         for project in self.registry:
             for archived in (False, True):
                 cursor: str | None = None
@@ -344,14 +408,12 @@ class CodexService:
                                 f"project_key={project.key} archived={archived} "
                                 f"page={page_number + 1} scanned_pages={scanned_pages}"
                             )
+                            self._thread_projects[thread_id] = project
                             return project, listed_thread
                     cursor = field(response, "next_cursor")
                     if not cursor:
                         break
-        LOGD(
-            f"codex_thread_lookup_miss thread_id={thread_id} "
-            f"scanned_pages={scanned_pages}"
-        )
+        LOGD(f"codex_thread_lookup_miss thread_id={thread_id} scanned_pages={scanned_pages}")
         raise ConsoleNotFound
 
     async def _authorized_thread(
@@ -362,18 +424,12 @@ class CodexService:
         model: str | None = None,
         reasoning_effort: str | None = None,
     ) -> tuple[Project, Any, Any]:
-        LOGD(
-            f"codex_thread_authorize_start thread_id={thread_id} "
-            f"include_turns={include_turns}"
-        )
+        LOGD(f"codex_thread_authorize_start thread_id={thread_id} include_turns={include_turns}")
         pending = self._pending_threads.get(thread_id)
         if pending is not None and model is None and reasoning_effort is None:
             project = pending.project
             thread = pending.handle
-            LOGD(
-                f"codex_thread_authorize_fresh thread_id={thread_id} "
-                f"project_key={project.key}"
-            )
+            LOGD(f"codex_thread_authorize_fresh thread_id={thread_id} project_key={project.key}")
         else:
             if pending is not None:
                 project = pending.project
@@ -385,11 +441,7 @@ class CodexService:
                     approval_mode=self.approval_mode,
                     sandbox=self.sandbox,
                     model=model,
-                    config=(
-                        {"model_reasoning_effort": reasoning_effort}
-                        if reasoning_effort is not None
-                        else None
-                    ),
+                    config=({"model_reasoning_effort": reasoning_effort} if reasoning_effort is not None else None),
                 ),
                 operation="thread_resume",
             )
@@ -398,14 +450,8 @@ class CodexService:
             operation="thread_read",
         )
         actual_thread = field(response, "thread")
-        if (
-            str(field(actual_thread, "id", "")) != thread_id
-            or self.registry.project_for_path(field(actual_thread, "cwd", "")) != project
-        ):
-            LOGD(
-                f"codex_thread_authorize_mismatch thread_id={thread_id} "
-                f"project_key={project.key}"
-            )
+        if str(field(actual_thread, "id", "")) != thread_id or self.registry.project_for_path(field(actual_thread, "cwd", "")) != project:
+            LOGD(f"codex_thread_authorize_mismatch thread_id={thread_id} project_key={project.key}")
             self._pending_threads.pop(thread_id, None)
             raise ConsoleNotFound
         self._refresh_pending_thread(
@@ -413,10 +459,8 @@ class CodexService:
             handle=thread,
             view=self._read_view(response, project),
         )
-        LOGD(
-            f"codex_thread_authorize_complete thread_id={thread_id} "
-            f"project_key={project.key} include_turns={include_turns}"
-        )
+        self._thread_projects[thread_id] = project
+        LOGD(f"codex_thread_authorize_complete thread_id={thread_id} project_key={project.key} include_turns={include_turns}")
         return project, thread, response
 
     def _read_view(self, response: Any, project: Project) -> dict[str, Any]:
@@ -430,10 +474,7 @@ class CodexService:
         model: str | None,
     ) -> dict[str, Any]:
         project = self._project(project_key)
-        LOGD(
-            f"codex_thread_create_start project_key={project.key} "
-            f"has_name={name is not None} model_selected={model is not None}"
-        )
+        LOGD(f"codex_thread_create_start project_key={project.key} has_name={name is not None} model_selected={model is not None}")
         thread = await self._call(
             self.codex.thread_start(
                 cwd=str(project.path),
@@ -444,10 +485,7 @@ class CodexService:
             operation="thread_start",
         )
         created_thread_id = str(field(thread, "id", ""))
-        LOGD(
-            f"codex_thread_create_started project_key={project.key} "
-            f"thread_id={created_thread_id or 'missing'}"
-        )
+        LOGD(f"codex_thread_create_started project_key={project.key} thread_id={created_thread_id or 'missing'}")
         if name:
             await self._call(
                 thread.set_name(name),
@@ -459,10 +497,7 @@ class CodexService:
         )
         actual = field(response, "thread")
         if self.registry.project_for_path(field(actual, "cwd", "")) != project:
-            LOGD(
-                f"codex_thread_create_project_mismatch project_key={project.key} "
-                f"thread_id={created_thread_id or 'missing'}"
-            )
+            LOGD(f"codex_thread_create_project_mismatch project_key={project.key} thread_id={created_thread_id or 'missing'}")
             raise ConsoleNotFound
         view = self._read_view(response, project)
         self._remember_pending_thread(
@@ -470,27 +505,129 @@ class CodexService:
             handle=thread,
             view=view,
         )
-        LOGD(
-            f"codex_thread_create_complete project_key={project.key} "
-            f"thread_id={view['id']}"
-        )
+        LOGD(f"codex_thread_create_complete project_key={project.key} thread_id={view['id']}")
         return view
 
-    async def read_thread(self, thread_id: str, *, include_turns: bool = True) -> dict[str, Any]:
-        LOGD(
-            f"codex_thread_read_start thread_id={thread_id} "
-            f"include_turns={include_turns}"
+    @staticmethod
+    def _journal_envelope(record: dict[str, Any]) -> EventEnvelope:
+        return EventEnvelope(
+            sequence=int(record["seq"]),
+            thread_id=str(record["thread_id"]),
+            turn_id=(str(record["turn_id"]) if record.get("turn_id") else None),
+            type=str(record.get("event_type") or "codex.notification"),
+            method=str(record.get("method") or record.get("type") or "unknown"),
+            data=dict(record.get("data") or {}),
         )
+
+    async def _materialized_view(
+        self,
+        project: Project,
+        history_view: dict[str, Any],
+    ) -> dict[str, Any]:
+        thread_id = str(history_view["id"])
+        journal = await self.stream_journal.read(project.path, thread_id)
+        current_watermark = history_watermark(history_view)
+        imported_watermarks = [event.get("data") for event in journal.events if event.get("type") == "history.baseline_imported"]
+        if journal.coverage != "complete" or current_watermark not in imported_watermarks:
+            async with self._publish_lock:
+                imported = await self.stream_journal.append_history(
+                    project.path,
+                    thread_id,
+                    history_view,
+                )
+                for appended in imported:
+                    if not appended.duplicate:
+                        await self._fan_out_record(appended.record)
+            journal = await self.stream_journal.read(project.path, thread_id)
+
+        turns, aliases = materialize_timeline(thread_id, journal)
+        if aliases:
+            async with self._publish_lock:
+                attached = await self.stream_journal.attach_aliases(
+                    project.path,
+                    thread_id,
+                    aliases,
+                )
+                for appended in attached:
+                    if not appended.duplicate:
+                        await self._fan_out_record(appended.record)
+            journal = await self.stream_journal.read(project.path, thread_id)
+            turns, _unused_aliases = materialize_timeline(thread_id, journal)
+        journal_diff = ""
+        journal_usage: dict[str, Any] | None = None
+        for event in journal.events:
+            data = event.get("data") if isinstance(event.get("data"), dict) else {}
+            if event.get("type") == "file_change.updated":
+                journal_diff = str(data.get("diff") or "")
+            elif event.get("type") == "usage.updated":
+                journal_usage = dict(data)
+        await self.event_hub.advance_sequence(thread_id, journal.cursor)
+        return {
+            **history_view,
+            "turns": turns,
+            "journal_cursor": journal.cursor,
+            "journal_coverage": journal.coverage,
+            "journal_diff": journal_diff,
+            "journal_usage": journal_usage,
+        }
+
+    async def read_thread(self, thread_id: str, *, include_turns: bool = True) -> dict[str, Any]:
+        LOGD(f"codex_thread_read_start thread_id={thread_id} include_turns={include_turns}")
         project, _thread, response = await self._authorized_thread(
             thread_id,
             include_turns=include_turns,
         )
         view = self._read_view(response, project)
-        LOGD(
-            f"codex_thread_read_complete thread_id={thread_id} "
-            f"project_key={project.key} include_turns={include_turns}"
-        )
+        if include_turns:
+            view = await self._materialized_view(project, view)
+        LOGD(f"codex_thread_read_complete thread_id={thread_id} project_key={project.key} include_turns={include_turns}")
         return view
+
+    async def snapshot_thread(self, thread_id: str) -> dict[str, Any]:
+        return await self.read_thread(thread_id, include_turns=True)
+
+    async def journal_cursor(self, thread_id: str) -> int:
+        project = self._thread_projects.get(thread_id)
+        if project is None:
+            project, _listed = await self._find_thread(thread_id)
+        journal = await self.stream_journal.read(project.path, thread_id)
+        await self.event_hub.advance_sequence(thread_id, journal.cursor)
+        return journal.cursor
+
+    async def subscribe_events(
+        self,
+        thread_id: str,
+        *,
+        after_sequence: int | None,
+    ) -> tuple[Subscription, list[EventEnvelope], int, bool]:
+        """Register live delivery first, then read durable replay without a gap."""
+        project = self._thread_projects.get(thread_id)
+        if project is None:
+            project, _listed = await self._find_thread(thread_id)
+        subscription = await self.event_hub.subscribe(
+            thread_id,
+            after_sequence=after_sequence,
+        )
+        journal = await self.stream_journal.read(project.path, thread_id)
+        await self.event_hub.advance_sequence(thread_id, journal.cursor)
+        durable_replay = (
+            [self._journal_envelope(event) for event in journal.events if int(event["seq"]) > after_sequence]
+            if after_sequence is not None
+            else []
+        )
+        replay_by_sequence = {event.sequence: event for event in [*subscription.initial_events, *durable_replay]}
+        replay = [replay_by_sequence[key] for key in sorted(replay_by_sequence)]
+        replay_boundary = journal.cursor if journal.exists else await self.event_hub.current_sequence(thread_id)
+        resync_required = bool(
+            after_sequence is not None
+            and (
+                after_sequence > replay_boundary
+                or journal.damaged
+                or (subscription.resync_required and not journal.exists)
+                or (replay and replay[0].sequence != after_sequence + 1)
+            )
+        )
+        return subscription, replay, replay_boundary, resync_required
 
     async def rename_thread(self, thread_id: str, name: str) -> dict[str, Any]:
         project, thread, _response = await self._authorized_thread(thread_id, include_turns=False)
@@ -567,11 +704,10 @@ class CodexService:
                     raise delete_error
                 if still_listed is not False:
                     raise
-                LOGW(
-                    f"Codex delete reported failure after removing the session: "
-                    f"thread_id={thread_id} project_key={project.key}"
-                )
+                LOGW(f"Codex delete reported failure after removing the session: thread_id={thread_id} project_key={project.key}")
             self._pending_threads.pop(thread_id, None)
+            await self.stream_journal.trash_thread(project.path, thread_id)
+            self._thread_projects.pop(thread_id, None)
             return {
                 "thread_id": thread_id,
                 "project_key": project.key,
@@ -599,9 +735,7 @@ class CodexService:
                     operation="thread_list_delete_verify",
                 )
                 if any(
-                    str(field(thread, "id", "")) == thread_id
-                    and self.registry.project_for_path(field(thread, "cwd", ""))
-                    == project
+                    str(field(thread, "id", "")) == thread_id and self.registry.project_for_path(field(thread, "cwd", "")) == project
                     for thread in field(response, "data", ())
                 ):
                     return True
@@ -644,12 +778,7 @@ class CodexService:
                 thread.read(include_turns=True),
                 operation="thread_read_unarchived",
             )
-            if (
-                self.registry.project_for_path(
-                    field(field(response, "thread"), "cwd", "")
-                )
-                != project
-            ):
+            if self.registry.project_for_path(field(field(response, "thread"), "cwd", "")) != project:
                 self._pending_threads.pop(thread_id, None)
                 raise ConsoleNotFound
             view = self._read_view(response, project)
@@ -688,12 +817,7 @@ class CodexService:
                 forked.read(include_turns=True),
                 operation="thread_read_forked",
             )
-            if (
-                self.registry.project_for_path(
-                    field(field(response, "thread"), "cwd", "")
-                )
-                != project
-            ):
+            if self.registry.project_for_path(field(field(response, "thread"), "cwd", "")) != project:
                 raise ConsoleNotFound
             view = self._read_view(response, project)
             self._remember_pending_thread(
@@ -722,7 +846,7 @@ class CodexService:
         except (TurnConflictError, TurnsUnavailableError) as exc:
             raise ConsoleConflict from exc
 
-        await self.event_hub.publish(
+        await self._publish(
             thread_id,
             event_type="console.turn.starting",
             method="console.turn.starting",
@@ -755,12 +879,26 @@ class CodexService:
                 turn_id=turn_id,
                 handle=handle,
             )
+            user_item_id = f"console-user-{uuid.uuid4().hex}"
+            await self._publish(
+                thread_id,
+                event_type="codex.notification",
+                method="item/completed",
+                data={
+                    "item": {
+                        "id": user_item_id,
+                        "type": "userMessage",
+                        "content": [{"type": "text", "text": prompt}],
+                    }
+                },
+                turn_id=turn_id,
+            )
             task = asyncio.create_task(
                 self._pump_turn(thread_id, turn_id, handle),
                 name=f"codex-turn:{thread_id}:{turn_id}",
             )
             await self.turn_manager.attach_task(thread_id, task)
-            await self.event_hub.publish(
+            running_event = await self._publish(
                 thread_id,
                 event_type="console.turn.running",
                 method="console.turn.running",
@@ -774,10 +912,11 @@ class CodexService:
                 "accepted": True,
                 "thread_id": thread_id,
                 "turn_id": turn_id,
+                "journal_cursor": running_event.sequence if running_event else None,
             }
         except asyncio.CancelledError:
             await self.turn_manager.finish(thread_id)
-            await self.event_hub.publish(
+            await self._publish(
                 thread_id,
                 event_type="console.turn.idle",
                 method="console.turn.idle",
@@ -785,7 +924,7 @@ class CodexService:
             raise
         except Exception:
             await self.turn_manager.finish(thread_id)
-            await self.event_hub.publish(
+            await self._publish(
                 thread_id,
                 event_type="console.turn.error",
                 method="console.turn.error",
@@ -829,7 +968,7 @@ class CodexService:
         except (TurnConflictError, TurnsUnavailableError) as exc:
             raise ConsoleConflict from exc
 
-        await self.event_hub.publish(
+        await self._publish(
             thread_id,
             event_type="console.goal.starting",
             method="console.goal.starting",
@@ -871,7 +1010,7 @@ class CodexService:
                 name=f"codex-goal:{thread_id}:{turn_id}",
             )
             await self.turn_manager.attach_task(thread_id, task)
-            await self.event_hub.publish(
+            await self._publish(
                 thread_id,
                 event_type="console.goal.running",
                 method="console.goal.running",
@@ -892,7 +1031,7 @@ class CodexService:
             }
         except asyncio.CancelledError:
             await self.turn_manager.finish(thread_id)
-            await self.event_hub.publish(
+            await self._publish(
                 thread_id,
                 event_type="console.goal.idle",
                 method="console.goal.idle",
@@ -900,7 +1039,7 @@ class CodexService:
             raise
         except Exception:
             await self.turn_manager.finish(thread_id)
-            await self.event_hub.publish(
+            await self._publish(
                 thread_id,
                 event_type="console.goal.error",
                 method="console.goal.error",
@@ -925,7 +1064,7 @@ class CodexService:
         except (TurnConflictError, TurnsUnavailableError) as exc:
             raise ConsoleConflict from exc
 
-        await self.event_hub.publish(
+        await self._publish(
             thread_id,
             event_type="console.goal.starting",
             method="console.goal.starting",
@@ -963,7 +1102,7 @@ class CodexService:
                 name=f"codex-goal:{thread_id}:{turn_id}",
             )
             await self.turn_manager.attach_task(thread_id, task)
-            await self.event_hub.publish(
+            await self._publish(
                 thread_id,
                 event_type="console.goal.running",
                 method="console.goal.running",
@@ -984,7 +1123,7 @@ class CodexService:
             }
         except asyncio.CancelledError:
             await self.turn_manager.finish(thread_id)
-            await self.event_hub.publish(
+            await self._publish(
                 thread_id,
                 event_type="console.goal.idle",
                 method="console.goal.idle",
@@ -992,7 +1131,7 @@ class CodexService:
             raise
         except Exception:
             await self.turn_manager.finish(thread_id)
-            await self.event_hub.publish(
+            await self._publish(
                 thread_id,
                 event_type="console.goal.error",
                 method="console.goal.error",
@@ -1032,7 +1171,7 @@ class CodexService:
             goal = self._goal_view(raw_goal)
             if goal is None:
                 raise ConsoleBadRequest
-            await self.event_hub.publish(
+            await self._publish(
                 thread_id,
                 event_type="console.goal.updated",
                 method="thread/goal/updated",
@@ -1069,7 +1208,7 @@ class CodexService:
                 operation="thread_goal_clear",
                 invalid_is_bad_request=True,
             )
-            await self.event_hub.publish(
+            await self._publish(
                 thread_id,
                 event_type="console.goal.cleared",
                 method="thread/goal/cleared",
@@ -1085,18 +1224,19 @@ class CodexService:
         try:
             async for notification in handle.stream():
                 method, data = notification_view(notification)
-                await self.event_hub.publish(
+                await self._publish(
                     thread_id,
                     event_type="codex.notification",
                     method=method,
                     data=data,
                     turn_id=turn_id,
+                    channel="scoped",
                 )
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             LOGW(f"Codex goal stream failed: {type(exc).__name__}")
-            await self.event_hub.publish(
+            await self._publish(
                 thread_id,
                 event_type="console.goal.error",
                 method="console.goal.error",
@@ -1105,7 +1245,7 @@ class CodexService:
             )
         finally:
             await self.turn_manager.finish(thread_id, turn_id=turn_id)
-            await self.event_hub.publish(
+            await self._publish(
                 thread_id,
                 event_type="console.goal.idle",
                 method="console.goal.idle",
@@ -1116,18 +1256,19 @@ class CodexService:
         try:
             async for notification in handle.stream():
                 method, data = notification_view(notification)
-                await self.event_hub.publish(
+                await self._publish(
                     thread_id,
                     event_type="codex.notification",
                     method=method,
                     data=data,
                     turn_id=turn_id,
+                    channel="scoped",
                 )
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             LOGW(f"Codex turn stream failed: {type(exc).__name__}")
-            await self.event_hub.publish(
+            await self._publish(
                 thread_id,
                 event_type="console.turn.error",
                 method="console.turn.error",
@@ -1136,7 +1277,7 @@ class CodexService:
             )
         finally:
             await self.turn_manager.finish(thread_id, turn_id=turn_id)
-            await self.event_hub.publish(
+            await self._publish(
                 thread_id,
                 event_type="console.turn.idle",
                 method="console.turn.idle",
@@ -1152,14 +1293,33 @@ class CodexService:
             )
         except TurnNotActiveError as exc:
             raise ConsoleConflict from exc
-        await self.event_hub.publish(
+        user_item_id = f"console-user-{uuid.uuid4().hex}"
+        await self._publish(
+            thread_id,
+            event_type="codex.notification",
+            method="item/completed",
+            data={
+                "item": {
+                    "id": user_item_id,
+                    "type": "userMessage",
+                    "content": [{"type": "text", "text": prompt}],
+                }
+            },
+            turn_id=active.turn_id,
+        )
+        steered_event = await self._publish(
             thread_id,
             event_type="console.turn.steered",
             method="console.turn.steered",
             data={"accepted": True},
             turn_id=active.turn_id,
         )
-        return {"accepted": True, "thread_id": thread_id, "turn_id": active.turn_id}
+        return {
+            "accepted": True,
+            "thread_id": thread_id,
+            "turn_id": active.turn_id,
+            "journal_cursor": steered_event.sequence if steered_event else None,
+        }
 
     async def interrupt_turn(self, thread_id: str) -> dict[str, Any]:
         try:
@@ -1170,14 +1330,10 @@ class CodexService:
             )
         except TurnNotActiveError as exc:
             raise ConsoleConflict from exc
-        await self.event_hub.publish(
+        await self._publish(
             thread_id,
-            event_type=(
-                "console.goal.stopping" if active.kind == "goal" else "console.turn.stopping"
-            ),
-            method=(
-                "console.goal.stopping" if active.kind == "goal" else "console.turn.stopping"
-            ),
+            event_type=("console.goal.stopping" if active.kind == "goal" else "console.turn.stopping"),
+            method=("console.goal.stopping" if active.kind == "goal" else "console.turn.stopping"),
             turn_id=active.turn_id,
         )
         return {"accepted": True, "thread_id": thread_id, "turn_id": active.turn_id}

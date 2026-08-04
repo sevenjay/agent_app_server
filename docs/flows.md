@@ -14,7 +14,7 @@ flowchart TD
     threads --> saved{"有保存的 thread_id？"}
     saved -->|是| authorize["讀取並驗證 Thread"]
     authorize --> restored{"Thread 屬於目前 Project？"}
-    restored -->|是| select["選取 Thread、連線 SSE、更新 partials"]
+    restored -->|是| select["選取 Thread、載入 Journal snapshot<br/>再用 cursor 連線 SSE"]
     restored -->|否| clear["清除失效的 Thread preference"]
     saved -->|否| choose["等待使用者建立或選擇 session"]
     valid -->|否| reset["清除失效 preferences"]
@@ -80,13 +80,16 @@ sequenceDiagram
     participant Turns as TurnManager
     participant Codex as AsyncCodex / app-server
     participant Pump as event-pump task
+    participant Journal as Stream Journal
     participant Hub as EventHub
 
-    Browser->>API: GET /threads/{id}/events
-    API->>Service: read_thread(include_turns=false)
-    Service->>Codex: list / resume / read
-    Service->>Service: 核對 Thread id 與 CWD
-    API->>Hub: subscribe(thread_id)
+    Browser->>API: GET /threads/{id}/snapshot 或 timeline partial
+    API->>Service: snapshot_thread()
+    Service->>Journal: materialize + history fallback
+    API-->>Browser: Timeline + journal_cursor=N
+    Browser->>API: GET /threads/{id}/events?after_sequence=N
+    API->>Hub: 先 subscribe(thread_id)
+    API->>Journal: replay seq > N
     API-->>Browser: console.stream.ready
 
     User->>Browser: 送出 prompt
@@ -95,7 +98,8 @@ sequenceDiagram
     API->>Service: start_turn()
     Service->>Turns: reserve(thread_id)
     Turns-->>Service: 狀態 = starting
-    Service->>Hub: publish console.turn.starting
+    Service->>Journal: normalize + append + flush
+    Journal->>Hub: publish console.turn.starting
     Hub-->>API: subscriber queue event
     API-->>Browser: SSE starting
 
@@ -103,13 +107,15 @@ sequenceDiagram
     Codex-->>Service: Turn handle
     Service->>Turns: mark_running + attach_task
     Service->>Pump: create_task(handle.stream)
-    Service->>Hub: publish console.turn.running
+    Service->>Journal: append user + turn.started
+    Journal->>Hub: publish durable events
     Service-->>API: accepted + turn_id
     API-->>Browser: HTTP 202
 
     loop 每個 Codex notification
         Codex-->>Pump: notification
-        Pump->>Hub: normalized event
+        Pump->>Journal: normalize／redact + append／flush
+        Journal->>Hub: publish persisted event
         Hub-->>API: subscriber queue event
         API-->>Browser: SSE event
         Browser->>Browser: 更新 plan、diff、usage、timeline
@@ -117,17 +123,18 @@ sequenceDiagram
 
     Codex-->>Pump: stream 完成或失敗
     opt stream 失敗
-        Pump->>Hub: console.turn.error
+        Pump->>Journal: turn.error + fsync
     end
     Pump->>Turns: finish(thread_id, turn_id)
-    Pump->>Hub: console.turn.idle
+    Pump->>Journal: console.turn.idle
+    Journal->>Hub: publish persisted event
     Hub-->>API: subscriber queue event
     API-->>Browser: SSE idle
-    Browser->>API: 重新取得 authoritative Thread partials
-    Browser->>Browser: partial 更新成功後移除該 Turn 的 optimistic items
+    Browser->>API: 重新取得 Journal snapshot partials
+    Browser->>Browser: 依 snapshot cursor 清除已涵蓋 transient items
 ```
 
-使用者訊息、agent delta 與完成的 tool results 共用依到達順序排列的 live timeline。Browser 在 HTTP request 前先顯示使用者訊息；POST／steer 失敗時移除該 optimistic item 並還原 composer。收到 `item/completed` 時，command、file change、MCP／dynamic tool 等最終 item 會立即顯示為 tool-card，不需等待整個 Turn idle。新的 agent segment 或 tool-card 開始時，前一段會結束 `streaming`／`aria-busy` 狀態，只有目前輸出的最後一段保留閃爍游標。成功時用回傳或 SSE 的 `turn_id` 綁定 item，等 idle 後 authoritative partial 更新成功才清除，避免重複或 refresh 失敗時遺失訊息。
+使用者訊息、agent delta 與完成的 tool results 共用依到達順序排列的 live timeline。Browser 在 HTTP request 前先顯示使用者訊息；POST／steer 成功後以回傳的 `journal_cursor` 綁定 optimistic item。收到 `item/completed` 時，agent、command、file change、MCP／dynamic tool 等最終 item 立即關閉 streaming UI。snapshot 回傳 cursor `N` 後，前端可移除所有 `sequence <= N` 的 transient item，不再依賴 live `msg_...` 與 history `item-N` 相等。
 
 同一 Thread 已是 `starting`、`running`、`stopping` 或正在執行互斥 mutation 時，新 Turn 會回 `409`。不同 Threads 使用不同 active entry，因此可並行。活動 Turn 上再次送出 prompt 會走 steer；steer 也會先加入 optimistic user message，並讓後續 agent delta 建立在它之後。Interrupt 會先呼叫 handle，再發布 `console.turn.stopping`。
 
@@ -143,6 +150,7 @@ sequenceDiagram
     participant Turns as TurnManager
     participant Goal as CodexGoalAdapter
     participant Codex as Codex app-server
+    participant Journal as Stream Journal
     participant Hub as EventHub
 
     Browser->>API: POST /threads/{id}/goal
@@ -159,35 +167,37 @@ sequenceDiagram
     loop 自動 continuation Turns
         Codex-->>Goal: physical Turn notifications
         Goal-->>Service: logical turn_id notifications + goal updates
-        Service->>Hub: publish SSE
+        Service->>Journal: append notification
+        Journal->>Hub: publish SSE
         Hub-->>Browser: timeline/status/usage updates
     end
 
     Codex-->>Goal: complete/blocked/limited/paused
     Goal-->>Service: one logical completion
     Service->>Turns: finish
-    Service->>Hub: console.goal.idle
+    Service->>Journal: append console.goal.idle
+    Journal->>Hub: publish durable event
 ```
 
-Goal active 期間與一般 Turn、fork、archive 等 mutation 互斥。一般 composer 文字仍可 steer 目前的 physical Goal Turn；`Pause`／`Stop` 會先把 Goal 設為 paused 再 interrupt physical Turn，避免 continuation 自動重啟。Graceful shutdown 同樣透過 logical handle pause 並 drain Goal pump。Browser 中斷 SSE 不會停止 Goal，重連後沿用 EventHub replay；超出 replay window 時重新讀取 Thread history 與 Goal snapshot。
+Goal active 期間與一般 Turn、fork、archive 等 mutation 互斥。一般 composer 文字仍可 steer 目前的 physical Goal Turn；`Pause`／`Stop` 會先把 Goal 設為 paused 再 interrupt physical Turn，避免 continuation 自動重啟。Graceful shutdown 同樣透過 logical handle pause 並 drain Goal pump。Browser 中斷 SSE 不會停止 Goal；斷線期間的 notification 仍寫入 Journal，重連時從 durable cursor replay。
 
 Codex Goal RPC 本身不帶 model 或 reasoning effort 欄位，因此 Web 在啟動或恢復 Goal 前，會在同一個 per-thread reservation 內先用 `thread/resume` 套用目前選定的 model 與 `config.model_reasoning_effort`。後續由 runtime 自動建立的 continuation Turns 便沿用該 Thread 設定；`console.goal.starting` 與 `console.goal.running` 也會攜帶相同 model／reasoning effort，讓其他分頁及重新渲染後的 Inspector 顯示一致。
 
 ## SSE reconnect、replay 與 resync
 
-每個 Thread 都有 process-local 單調 sequence 與有限 history。SSE event 的 `id` 就是 sequence；Browser 每成功處理一筆 event，也會在頁面記憶體內保存該 Thread 的最後 sequence。原生 `EventSource` 因網路問題自動 reconnect 時會用 `Last-Event-ID` 要求缺少的事件；使用者主動切換 Session 時會關閉舊 SSE，切回後建立帶有 `after_sequence` query cursor 的新 SSE。這份 per-Thread cursor 不寫入 SQLite 或 Browser persistent storage，重新整理頁面後仍以 Codex Thread history 重新建立基準。完整設計、邊界案例與測試對照請見 [Session event replay](session-event-replay.md)。
+每個 Thread 的 sequence 由 Project 內的 Stream Journal 永久配置；SSE event `id` 與 JSONL `seq` 相同。Browser 選取 Session 時先載入 snapshot，從 HTML 的 `data-journal-cursor` 建立 high-water mark，再以 `after_sequence` 連線。重新整理不需要保存 Browser cursor，因為新 snapshot 會重新提供 durable cursor。原生 `EventSource` 自動重連時仍使用 `Last-Event-ID`，且 header 優先於 URL query。完整邊界案例請見 [Session event replay](session-event-replay.md)。
 
 ```mermaid
 flowchart TD
     connect["SSE connect / reconnect"] --> cursor["自動重連使用 Last-Event-ID<br/>Session 切回使用 after_sequence"]
     cursor --> auth["重新驗證 Thread 與 CWD"]
-    auth --> subscribe["依有效 cursor 建立 bounded subscriber queue"]
-    subscribe --> range{"cursor 是否存在且<br/>超出目前 replay window？"}
-    range -->|否，沒有 ID| ready["送出 console.stream.ready"]
-    range -->|否，仍可 replay| replay["依序 replay 較新的 events"]
+    auth --> subscribe["先註冊 EventHub subscriber<br/>封住 snapshot→live 空窗"]
+    subscribe --> range{"cursor 是否有效且<br/>Journal 未損壞？"}
+    range -->|沒有 ID| ready["送出目前 durable cursor + ready"]
+    range -->|有效| replay["從 JSONL 依序 replay seq > cursor"]
     replay --> ready
-    range -->|是：backend restart、future id 或 history gap| resync["送出 console.stream.resync_required"]
-    resync --> refresh["Browser 重新取得 authoritative Thread partials"]
+    range -->|future id、損壞或 sequence gap| resync["送出 console.stream.resync_required"]
+    resync --> refresh["Browser 重新取得 Journal snapshot／history fallback"]
     refresh --> ready
     ready --> live["等待 live events<br/>閒置時每 15 秒 heartbeat"]
     live --> overflow{"subscriber queue overflow？"}
@@ -197,9 +207,9 @@ flowchart TD
     refresh_closed --> connect
 ```
 
-Replay 只用來補足短暫斷線，不是持久化 event store。遇到 process restart、history gap 或 slow subscriber overflow 時，UI 必須回到 Codex Thread history 重新同步，不能把本地 live event list 當成權威資料。
+SSE 建立時會先註冊 live subscriber，再讀取 JSONL。若其間有新事件，它同時出現在 replay 與 subscriber queue，後端以 snapshot high-water sequence 過濾 queue 中的重複，因此 snapshot 與 live 之間沒有空窗。EventHub history 只作短期相容 cache；durable replay 不受其 bounded window 或 backend restart 影響。
 
-`Last-Event-ID` header 與 `after_sequence` 同時存在時，Backend 以 header 為準，因為它代表同一個 `EventSource` 已經在目前 URL cursor 之後成功收到的新事件。若 cursor 早於 EventHub 最舊保留事件，或 Backend restart 後 cursor 大於重新開始的 sequence，Backend 會送出 `console.stream.resync_required`。Browser 此時以事件攜帶的目前 sequence 重設該 Thread cursor、清除 transient live state，並重新讀取 Codex Thread／Goal 的 authoritative partials；同一條 SSE 隨後繼續承接較新的 live events。
+Journal reader 遇到不完整最後一行時會忽略該行並把 coverage 降為 `partial`；中間損壞、重複／倒退 sequence 或 future cursor 會觸發 resync。Browser 清除 transient state、重載 snapshot，再用新的 durable cursor 連線。Slow subscriber overflow 也會送出 resync 並關閉連線，但已落盤事件仍可完整補回。
 
 ## 關閉中的 Turn
 

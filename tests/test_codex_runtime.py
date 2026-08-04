@@ -1,4 +1,5 @@
 import asyncio
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,6 +12,9 @@ from codex_runtime import (
 )
 from projects import Project, ProjectRegistry
 from tests.fakes import FakeCodex, FakeNotification
+
+_PROJECT_DIRECTORY = tempfile.TemporaryDirectory(prefix="runtime-journal-test-")
+TEST_PROJECT_PATH = Path(_PROJECT_DIRECTORY.name).resolve()
 
 
 def runtime_settings() -> SimpleNamespace:
@@ -27,13 +31,14 @@ def runtime_settings() -> SimpleNamespace:
 
 
 def registry() -> ProjectRegistry:
-    path = Path.cwd().resolve()
-    return ProjectRegistry([Project("agent_app_server", "Agent App Server", path)])
+    return ProjectRegistry(
+        [Project("agent_app_server", "Agent App Server", TEST_PROJECT_PATH)]
+    )
 
 
 @pytest.mark.asyncio
 async def test_runtime_starts_health_checks_and_closes_client() -> None:
-    fake = FakeCodex(Path.cwd())
+    fake = FakeCodex(TEST_PROJECT_PATH)
     runtime = CodexRuntime(
         settings_obj=runtime_settings(),
         registry=registry(),
@@ -63,7 +68,7 @@ async def test_runtime_starts_health_checks_and_closes_client() -> None:
 
 @pytest.mark.asyncio
 async def test_runtime_health_sample_loop_refreshes_limits() -> None:
-    fake = FakeCodex(Path.cwd())
+    fake = FakeCodex(TEST_PROJECT_PATH)
     settings = runtime_settings()
     settings.scheduler_health_sample_seconds = 0.01
     runtime = CodexRuntime(
@@ -133,7 +138,7 @@ def test_rate_limit_rows_support_monthly_and_weekly_windows() -> None:
 
 @pytest.mark.asyncio
 async def test_runtime_forwards_global_session_status_notifications() -> None:
-    fake = FakeCodex(Path.cwd())
+    fake = FakeCodex(TEST_PROJECT_PATH)
     runtime = CodexRuntime(
         settings_obj=runtime_settings(),
         registry=registry(),
@@ -154,10 +159,15 @@ async def test_runtime_forwards_global_session_status_notifications() -> None:
             },
         )
     )
-    event = await asyncio.wait_for(
-        runtime.event_hub.next_event(subscription),
-        timeout=0.1,
-    )
+    event = None
+    for _ in range(2):
+        candidate = await asyncio.wait_for(
+            runtime.event_hub.next_event(subscription),
+            timeout=0.1,
+        )
+        if candidate is not None and candidate.method == "thread/status/changed":
+            event = candidate
+            break
 
     assert event is not None
     assert event.method == "thread/status/changed"
@@ -168,7 +178,7 @@ async def test_runtime_forwards_global_session_status_notifications() -> None:
 
 @pytest.mark.asyncio
 async def test_runtime_fails_fast_when_sdk_or_account_is_unavailable() -> None:
-    failed = FakeCodex(Path.cwd(), fail_start=True)
+    failed = FakeCodex(TEST_PROJECT_PATH, fail_start=True)
     runtime = CodexRuntime(
         settings_obj=runtime_settings(),
         registry=registry(),
@@ -179,7 +189,7 @@ async def test_runtime_fails_fast_when_sdk_or_account_is_unavailable() -> None:
     assert runtime.ready is False
     assert failed.exited == 1
 
-    unauthenticated = FakeCodex(Path.cwd(), unauthenticated=True)
+    unauthenticated = FakeCodex(TEST_PROJECT_PATH, unauthenticated=True)
     runtime = CodexRuntime(
         settings_obj=runtime_settings(),
         registry=registry(),
@@ -198,7 +208,7 @@ async def test_runtime_account_health_check_has_a_bounded_timeout() -> None:
 
     settings = runtime_settings()
     settings.codex_operation_timeout_seconds = 0.01
-    hanging = HangingAccountFake(Path.cwd())
+    hanging = HangingAccountFake(TEST_PROJECT_PATH)
     runtime = CodexRuntime(
         settings_obj=settings,
         registry=registry(),
@@ -218,7 +228,7 @@ async def test_runtime_close_failure_and_timeout_do_not_escape_cleanup() -> None
         async def __aexit__(self, *_args):
             raise RuntimeError("close failed")
 
-    failing = FailingCloseFake(Path.cwd())
+    failing = FailingCloseFake(TEST_PROJECT_PATH)
     runtime = CodexRuntime(
         settings_obj=runtime_settings(),
         registry=registry(),
@@ -234,7 +244,7 @@ async def test_runtime_close_failure_and_timeout_do_not_escape_cleanup() -> None
 
     settings = runtime_settings()
     settings.codex_shutdown_timeout_seconds = 0.01
-    hanging = HangingCloseFake(Path.cwd())
+    hanging = HangingCloseFake(TEST_PROJECT_PATH)
     runtime = CodexRuntime(
         settings_obj=settings,
         registry=registry(),

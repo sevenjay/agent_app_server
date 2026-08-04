@@ -198,10 +198,16 @@
     class="lg:mt-6 lg:border-t lg:border-surface-700 lg:pt-5"
     :class="{ 'hidden lg:block': mobileTab !== 'status' }"
     aria-labelledby="usage-heading"
+    x-init='syncUsageSnapshot({{ thread.id|tojson }}, {{ thread.get("journal_usage")|tojson }}, {{ thread.get("journal_cursor", 0)|tojson }})'
   >
     <div class="flex items-center justify-between gap-3">
       <p id="usage-heading" class="section-kicker">Usage</p>
-      <span x-cloak x-show="liveUsage" class="usage-live-badge">Live</span>
+      <span
+        x-cloak
+        x-show="liveUsage"
+        class="usage-live-badge"
+        x-text="liveUsageSource === 'live' ? 'Live' : 'Journal'"
+      ></span>
     </div>
     <template x-if="liveUsage">
       <div class="mt-3 space-y-3" aria-live="polite">

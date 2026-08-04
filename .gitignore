@@ -8,6 +8,7 @@ __pycache__/
 # Runtime state
 data/
 logs/
+.stream_journal/
 *.sqlite
 *.db
 *.db-journal

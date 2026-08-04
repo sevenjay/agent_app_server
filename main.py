@@ -629,6 +629,19 @@ def create_app(
         metadata = await _touch_thread_metadata(session, thread, opened=True)
         return _decorate_thread(thread, metadata)
 
+    @application.get(
+        "/api/codex/threads/{thread_id}/snapshot",
+        dependencies=[Depends(require_web_user)],
+    )
+    async def api_thread_snapshot(
+        request: Request,
+        thread_id: ThreadId,
+        session: AsyncSession = Depends(get_session),
+    ) -> dict[str, Any]:
+        thread = await _service(request).snapshot_thread(thread_id)
+        metadata = await _touch_thread_metadata(session, thread, opened=True)
+        return _decorate_thread(thread, metadata)
+
     @application.patch(
         "/api/codex/threads/{thread_id}",
         dependencies=[Depends(require_web_user)],
@@ -841,32 +854,32 @@ def create_app(
                 f"console_sse_subscribe_start request_id={request_id} "
                 f"thread_id={thread_id} after_sequence={replay_after_sequence}"
             )
-            subscription = await service.event_hub.subscribe(
-                thread_id,
-                after_sequence=replay_after_sequence,
+            subscription, replay_events, journal_cursor, resync_required = (
+                await service.subscribe_events(
+                    thread_id,
+                    after_sequence=replay_after_sequence,
+                )
             )
             LOGD(
                 f"console_sse_subscribe_complete request_id={request_id} "
-                f"thread_id={thread_id} replay_count={len(subscription.initial_events)} "
-                f"resync_required={subscription.resync_required}"
+                f"thread_id={thread_id} replay_count={len(replay_events)} "
+                f"resync_required={resync_required}"
             )
             try:
-                if subscription.resync_required:
-                    sequence = await service.event_hub.current_sequence(thread_id)
+                if resync_required:
                     yield _format_sse(
                         _synthetic_event(
-                            sequence=sequence,
+                            sequence=journal_cursor,
                             thread_id=thread_id,
                             event_type="console.stream.resync_required",
                         )
                     )
                 else:
-                    for event in subscription.initial_events:
+                    for event in replay_events:
                         yield _format_sse(event)
-                sequence = await service.event_hub.current_sequence(thread_id)
                 yield _format_sse(
                     _synthetic_event(
-                        sequence=sequence,
+                        sequence=journal_cursor,
                         thread_id=thread_id,
                         event_type="console.stream.ready",
                     )
@@ -885,7 +898,7 @@ def create_app(
                             f"console_sse_resync_required request_id={request_id} "
                             f"thread_id={thread_id}"
                         )
-                        sequence = await service.event_hub.current_sequence(thread_id)
+                        sequence = await service.journal_cursor(thread_id)
                         yield _format_sse(
                             _synthetic_event(
                                 sequence=sequence,
@@ -894,6 +907,8 @@ def create_app(
                             )
                         )
                         return
+                    if event.sequence <= journal_cursor:
+                        continue
                     yield _format_sse(event)
             except asyncio.CancelledError:
                 LOGD(

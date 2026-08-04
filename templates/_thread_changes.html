@@ -1,11 +1,20 @@
-<div class="latest-changes-layout" data-thread-id="{{ thread.id }}">
+<div
+  class="latest-changes-layout"
+  data-thread-id="{{ thread.id }}"
+  x-init='syncDiffSnapshot({{ thread.id|tojson }}, {{ thread.get("journal_diff", "")|tojson }}, {{ thread.get("journal_cursor", 0)|tojson }})'
+>
   <header class="changes-heading">
     <div class="min-w-0">
       <p class="section-kicker">Working tree</p>
       <h2 class="changes-title">Latest changes</h2>
       <p class="changes-description">The most recent file updates reported for this session.</p>
     </div>
-    <span x-cloak x-show="liveDiff" class="changes-live-badge">Live</span>
+    <span
+      x-cloak
+      x-show="liveDiff"
+      class="changes-live-badge"
+      x-text="liveDiffSource === 'live' ? 'Live' : 'Journal'"
+    ></span>
   </header>
 
   <section x-cloak x-show="liveDiff" aria-label="Live unified diff">

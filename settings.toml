@@ -24,6 +24,7 @@ codex_shutdown_timeout_seconds = 10
 codex_operation_timeout_seconds = 30
 codex_sse_heartbeat_seconds = 15
 codex_thread_lookup_page_limit = 50
+codex_journal_retention_days = 30
 
 # Every real first-level directory is a Codex project. The Web console may
 # create a new project directory inside this root, but never accepts an

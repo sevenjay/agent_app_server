@@ -1,4 +1,5 @@
 import asyncio
+import tempfile
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -28,16 +29,20 @@ class ElementAttributeParser(HTMLParser):
 
 
 def fake_application():
-    project_path = Path.cwd().resolve()
+    project_directory = tempfile.TemporaryDirectory(prefix="app-journal-test-")
+    project_path = Path(project_directory.name).resolve()
     fake = FakeCodex(project_path)
     registry = ProjectRegistry(
         [Project("agent_app_server", "Agent App Server", project_path)]
     )
-    return create_app(
+    application = create_app(
         codex_client_factory=lambda: fake,
         codex_enabled=True,
         registry=registry,
-    ), fake
+    )
+    application.state.test_project_directory = project_directory
+    application.state.test_project_path = project_path
+    return application, fake
 
 
 def test_recent_plan_history_keeps_the_latest_three_in_order() -> None:
@@ -160,7 +165,7 @@ async def test_account_models_projects_and_thread_crud() -> None:
                 {
                     "key": "agent_app_server",
                     "name": "Agent App Server",
-                    "path": str(Path.cwd().resolve()),
+                    "path": str(application.state.test_project_path),
                 }
             ]
         }
@@ -335,7 +340,9 @@ async def test_project_root_discovery_creation_and_new_session(
 
 
 @pytest.mark.asyncio
-async def test_new_unlisted_thread_can_refresh_every_panel_and_connect_sse() -> None:
+async def test_new_unlisted_thread_can_refresh_every_panel_and_connect_sse(
+    tmp_path: Path,
+) -> None:
     class UnlistedNewThreadFake(FakeCodex):
         async def thread_list(self, **kwargs):
             response = await super().thread_list(**kwargs)
@@ -346,7 +353,7 @@ async def test_new_unlisted_thread_can_refresh_every_panel_and_connect_sse() -> 
             ]
             return response
 
-    project_path = Path.cwd().resolve()
+    project_path = tmp_path.resolve()
     fake = UnlistedNewThreadFake(project_path)
     registry = ProjectRegistry(
         [Project("agent_app_server", "Agent App Server", project_path)]
@@ -599,7 +606,6 @@ async def test_partials_escape_model_content_and_metadata_preferences() -> None:
         assert ">search</dd>" in timeline.text
         assert ">first query · second query</dd>" in timeline.text
         assert "outer query should stay hidden" not in timeline.text
-
         changes = await client.get("/partials/threads/thr_one/changes")
         assert changes.status_code == 200
         assert "Latest changes" in changes.text
@@ -631,6 +637,25 @@ async def test_partials_escape_model_content_and_metadata_preferences() -> None:
             json={"selected_project_key": "unknown"},
         )
         assert unknown_project.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_thread_snapshot_exposes_durable_journal_cursor_and_coverage() -> None:
+    application, _fake = fake_application()
+    async with application_client(application) as client:
+        response = await client.get("/api/codex/threads/thr_one/snapshot")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["id"] == "thr_one"
+    assert isinstance(payload["journal_cursor"], int)
+    assert payload["journal_cursor"] > 0
+    assert payload["journal_coverage"] in {"complete", "partial"}
+    assert any(
+        item["type"] == "commandExecution"
+        for turn in payload["turns"]
+        for item in turn["items"]
+    )
 
 
 @pytest.mark.asyncio

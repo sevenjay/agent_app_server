@@ -39,9 +39,10 @@ File manager 拒絕 absolute path、path traversal、Windows-style separator、c
 | --- | --- | --- |
 | `GET` | `/api/codex/threads` | 依 `project_key`、`archived`、`cursor`、`limit` 列出 Threads |
 | `POST` | `/api/codex/threads` | 在 Project 建立 Thread |
-| `GET` | `/api/codex/threads/{thread_id}` | 讀取完整 Thread／Turn history |
+| `GET` | `/api/codex/threads/{thread_id}` | 讀取 Journal materialized Thread／Timeline；partial 時合併 Codex history |
+| `GET` | `/api/codex/threads/{thread_id}/snapshot` | 讀取含 cursor、coverage、最新 diff／usage 的 materialized snapshot |
 | `PATCH` | `/api/codex/threads/{thread_id}` | 更新名稱、pin 或 custom label |
-| `DELETE` | `/api/codex/threads/{thread_id}` | 永久刪除 Thread 與對應 UI metadata |
+| `DELETE` | `/api/codex/threads/{thread_id}` | 刪除 Thread 與 UI metadata，Journal 先移至 retention 管理的 trash |
 | `POST` | `/api/codex/threads/{thread_id}/fork` | Fork Thread |
 | `POST` | `/api/codex/threads/{thread_id}/archive` | 封存 Thread |
 | `POST` | `/api/codex/threads/{thread_id}/unarchive` | 解除封存 Thread |
@@ -68,7 +69,7 @@ Goal 狀態與 usage 由 Codex Thread store 保存，不鏡像到 SQLite。Goal 
 | `POST` | `/api/codex/threads/{thread_id}/interrupt` | 中止活動 Turn |
 | `GET` | `/api/codex/threads/{thread_id}/events` | 訂閱該 Thread 的 SSE stream；可帶 `after_sequence` replay cursor |
 
-SSE 支援 `Last-Event-ID`、`after_sequence` query cursor、process-local bounded replay、comment heartbeat 與 `console.stream.resync_required`。同一個原生 `EventSource` 自動重連時，`Last-Event-ID` 優先於 URL 內原有的 `after_sequence`；主動切換 Session 所建立的新 `EventSource` 則以 Browser 記憶體內的 per-Thread sequence 作為 `after_sequence`。Browser 收到 `console.stream.ready` 後才會啟用送出操作。詳細 reconnect 行為請見[操作流程](flows.md#sse-reconnectreplay-與-resync)。
+SSE 支援 `Last-Event-ID`、`after_sequence` query cursor、JSONL durable replay、comment heartbeat 與 `console.stream.resync_required`。同一個原生 `EventSource` 自動重連時，`Last-Event-ID` 優先於 URL query；主動切換 Session 則使用 snapshot 的 `journal_cursor`。Backend 先註冊 live subscriber，再 replay Journal `seq > cursor`，最後以 high-water 過濾 queue 重複。Browser 收到 `console.stream.ready` 後才啟用送出操作。詳細行為請見[操作流程](flows.md#sse-reconnectreplay-與-resync)。
 
 ## HTML partials
 
@@ -77,7 +78,7 @@ SSE 支援 `Last-Event-ID`、`after_sequence` query cursor、process-local bound
 | `GET` | `/partials/codex/status` | Runtime、account、usage 與 model 狀態 |
 | `GET` | `/partials/projects` | Project selector |
 | `GET` | `/partials/threads` | Session list，支援 archived 與 cursor |
-| `GET` | `/partials/threads/{thread_id}/timeline` | 對話與 tool history |
+| `GET` | `/partials/threads/{thread_id}/timeline` | Journal Timeline snapshot，根元素帶 durable cursor／coverage |
 | `GET` | `/partials/threads/{thread_id}/inspector` | Session、Goal、plan 與 usage details |
 | `GET` | `/partials/threads/{thread_id}/changes` | Latest changes／diff view |
 | `GET` | `/partials/threads/{thread_id}/composer` | Prompt composer |

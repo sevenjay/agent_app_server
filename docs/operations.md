@@ -87,6 +87,7 @@ codex_shutdown_timeout_seconds = 10
 codex_operation_timeout_seconds = 30
 codex_sse_heartbeat_seconds = 15
 codex_thread_lookup_page_limit = 50
+codex_journal_retention_days = 30
 ```
 
 Web Permissions 卡片會用 Codex CLI 對應名稱呈現權限：
@@ -129,6 +130,14 @@ Files API 只接受 project-relative path，拒絕 absolute path、`..`、backsl
 
 SQLite 不保存 prompt、agent response、command output、diff、Goal、token usage 或 Codex conversation mirror。
 
+## Stream Journal
+
+每個有 Session 的 Project 會建立 `.stream_journal/<thread_id>/events.jsonl`。目錄與檔案權限分別固定為 `0700` 與 `0600`；Thread ID 在組合 path 前必須通過格式驗證。Journal 保存經 allowlist／redaction 的 user、agent、command、tool、file、web、plan 與 usage events，SSE sequence 直接沿用 JSONL `seq`。
+
+`codex_journal_retention_days` 預設 30。Runtime 啟動時會清除最後寫入時間早於 retention 的 Thread Journal，以及逾期 `.trash` 項目。刪除 Session 時不立即抹除 JSONL，而是先移至 Project 的 `.stream_journal/.trash/`，以便管理者在 retention 到期前復原。
+
+SQLite online backup 不包含 `.stream_journal/`。若部署需要備份完整 Timeline，必須另外備份各 Project 的 `.stream_journal/`，並採用不低於 database backup 的 owner、mode、加密與存取控制；不要把 Journal 放進公開 artifact 或一般 application log。
+
 Migration commands：
 
 ```bash
@@ -151,7 +160,7 @@ DATABASE_URL=sqlite+aiosqlite:////absolute/path/app.db poetry run python main.py
 - Jinja2 負責 HTML partials。
 - HTMX 2.0.4 負責 partial request／swap。
 - Alpine.js 3.14.9 管理 browser state 與操作協調。
-- 原生 `EventSource` 接收目前 Session 的 SSE；Alpine.js 在頁面記憶體保存 per-Session replay cursor，切回時補收 EventHub 仍保留的事件。
+- HTMX timeline snapshot 提供 durable Journal cursor；Alpine.js 清除已由 snapshot 涵蓋的 transient items，再由原生 `EventSource` 從 JSONL cursor replay 並接上 EventHub live fan-out。
 - Marked 15.0.12 解析 Markdown，再由 DOMPurify 3.2.6 sanitize。
 - Tailwind CSS 4 是唯一需要建置的 frontend asset。
 
@@ -174,7 +183,7 @@ npm ci
 npm run tw:build
 ```
 
-Python tests 使用 fake Codex adapter，不啟動真實 app-server、不要求 login，也不修改真實 Project。測試涵蓋 Project／CWD authorization、Files path safety、SDK serialization、Turn race、跨 Session concurrency、Goal lifecycle、SSE replay／overflow／resync、API／partials、metadata concurrency、runtime cleanup、CDN／SRI 與 frontend contract。
+Python tests 使用 fake Codex adapter，不啟動真實 app-server、不要求 login。Stream Journal 專用測試使用 pytest temporary Projects；測試涵蓋 durable replay、crash tail、redaction／truncation、cross-source alias、retention，以及既有 Project／CWD authorization、Turn、Goal、API／partials、runtime 與 frontend contracts。
 
 ## 部署
 
@@ -195,7 +204,7 @@ Python tests 使用 fake Codex adapter，不啟動真實 app-server、不要求 
 
 可用 `scripts/deploy.sh --help` 查看 `DEPLOY_REMOTE`、`DEPLOY_BRANCH`、`DEPLOY_APP_DIR` 與 skip flags。`DEPLOY_ALLOW_DIRTY=1` 只會略過 tracked worktree 保護，後續 hard reset 仍會覆寫修改，使用前必須確認資料可丟棄。
 
-完整服務必須維持單一 Uvicorn worker；多 worker 無法共享 active Turn、Goal handle、SSE history 與 subscriber state。理由請見[系統架構](architecture.md#為何限制單一-worker)。
+完整服務必須維持單一 Uvicorn worker；Journal replay 雖已持久化，多 worker 仍無法共享 active Turn、Goal handle、writer ordering 與 subscriber state。理由請見[系統架構](architecture.md#為何限制單一-worker)。
 
 ## Logs 與隱私
 

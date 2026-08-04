@@ -3,23 +3,24 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import time
 from collections.abc import Callable
 from datetime import datetime, timezone
-import os
 from pathlib import Path
-import time
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from openai_codex import ApprovalMode, AsyncCodex, Sandbox
 from openai_codex.generated.v2_all import GetAccountRateLimitsResponse
-from utility.log import LOGD, LOGI, LOGW
 
 from codex_serializers import field, notification_view, to_primitive
 from codex_service import CodexService, ConsoleUnavailable
 from event_hub import EventHub
 from projects import ProjectRegistry
+from stream_journal import StreamJournal
 from turn_manager import TurnManager
+from utility.log import LOGD, LOGI, LOGW
 
 
 def _approval_mode(value: str) -> ApprovalMode:
@@ -218,6 +219,7 @@ class CodexRuntime:
                 getattr(settings_obj, "codex_subscriber_queue_limit", 1000)
             ),
         )
+        self.stream_journal = StreamJournal()
         self.turn_manager = TurnManager()
         self.client: Any = None
         self.service: CodexService | None = None
@@ -303,12 +305,17 @@ class CodexRuntime:
                 sandbox=_sandbox(
                     str(getattr(self.settings, "codex_sandbox", "workspace_write"))
                 ),
+                stream_journal=self.stream_journal,
                 operation_timeout=float(
                     getattr(self.settings, "codex_operation_timeout_seconds", 30)
                 ),
                 lookup_page_limit=int(
                     getattr(self.settings, "codex_thread_lookup_page_limit", 50)
                 ),
+            )
+            self.stream_journal.prune_retention(
+                [project.path for project in self.registry],
+                days=int(getattr(self.settings, "codex_journal_retention_days", 30)),
             )
             await self._sample_rate_limits(client)
             self.ready = True
@@ -483,9 +490,11 @@ class CodexRuntime:
                 thread_id = data.get("thread_id") or data.get("threadId")
                 if not isinstance(thread_id, str) or not thread_id:
                     continue
-                await self.event_hub.publish(
+                service = self.service
+                if service is None:
+                    continue
+                await service.publish_notification(
                     thread_id,
-                    event_type="codex.notification",
                     method=method,
                     data=data,
                 )
@@ -553,4 +562,7 @@ class CodexRuntime:
             "active_turn_count": turn_status["active_turn_count"],
             "subscriber_count": await self.event_hub.subscriber_count(),
             "dropped_subscriber_count": self.event_hub.dropped_subscriber_count,
+            "journal": self.stream_journal.stats(
+                [project.path for project in self.registry]
+            ),
         }

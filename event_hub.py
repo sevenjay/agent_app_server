@@ -72,10 +72,16 @@ class EventHub:
         method: str,
         data: dict[str, Any] | None = None,
         turn_id: str | None = None,
+        sequence: int | None = None,
     ) -> EventEnvelope:
         async with self._lock:
             state = self._state(thread_id)
-            state.sequence += 1
+            if sequence is None:
+                state.sequence += 1
+            elif sequence <= state.sequence:
+                raise ValueError("Published event sequences must increase")
+            else:
+                state.sequence = sequence
             envelope = EventEnvelope(
                 sequence=state.sequence,
                 thread_id=thread_id,
@@ -109,9 +115,9 @@ class EventHub:
             resync_required = False
             initial: list[EventEnvelope] = []
             if after_sequence is not None:
-                if after_sequence > state.sequence:
-                    resync_required = True
-                elif history and after_sequence < history[0].sequence - 1:
+                if after_sequence > state.sequence or (
+                    history and after_sequence < history[0].sequence - 1
+                ):
                     resync_required = True
                 else:
                     initial = [event for event in history if event.sequence > after_sequence]
@@ -141,6 +147,14 @@ class EventHub:
     async def current_sequence(self, thread_id: str) -> int:
         async with self._lock:
             return self._state(thread_id).sequence
+
+    async def advance_sequence(self, thread_id: str, sequence: int) -> None:
+        """Align a restarted in-memory hub with a durable Journal high-water mark."""
+        if sequence < 0:
+            raise ValueError("Event sequence cannot be negative")
+        async with self._lock:
+            state = self._state(thread_id)
+            state.sequence = max(state.sequence, sequence)
 
     async def subscriber_count(self) -> int:
         async with self._lock:

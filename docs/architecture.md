@@ -16,7 +16,8 @@ flowchart LR
         registry["ProjectRegistry<br/>探索／建立 Project"]
         files["ProjectFileManager<br/>project-scoped file operations"]
         turns["TurnManager<br/>per-thread active state"]
-        events["EventHub<br/>sequence、replay、fan-out"]
+        journal["StreamJournal<br/>normalize、redact、durable sequence"]
+        events["EventHub<br/>live fan-out、short cache"]
         metadata["Async SQLAlchemy<br/>UI metadata access"]
         scheduler["APScheduler<br/>runtime health sample"]
     end
@@ -37,6 +38,8 @@ flowchart LR
     goals <-->|goal RPC / continuation notifications| codex
     service --> registry
     service --> turns
+    service --> journal
+    journal --> events
     service --> events
     web --> events
     web --> metadata
@@ -44,6 +47,7 @@ flowchart LR
     web --> files
     files <-->|list / upload / download<br/>mkdir / rename / delete| projects
     codex <-->|read / write workspace| projects
+    journal -->|.stream_journal JSONL| projects
     metadata --> sqlite
     scheduler -.->|status| web
     web -.-> logs
@@ -70,7 +74,8 @@ flowchart LR
 | `ProjectRegistry` | 探索 root 第一層目錄、建立 Project、key/path 對應 | Process；讀取時 refresh |
 | `ProjectFileManager` | 在單一 Project 內列出、上傳、下載、建立、重新命名與刪除檔案；拒絕 path escape 與 symlink | Request / workspace |
 | `TurnManager` | 原子保留 Turn、維持 active handle/task、排除衝突 mutation、shutdown drain | Process memory |
-| `EventHub` | Per-thread 單調 sequence、有限 replay、bounded subscriber queue | Process memory |
+| `StreamJournal` | SDK event normalize／redact、per-thread JSONL append、durable sequence、history backfill、Timeline materialization、retention／trash | Project persistent data |
+| `EventHub` | 已持久事件的即時 fan-out、短期 cache、bounded subscriber queue | Process memory |
 | SQLAlchemy / SQLite | Pin、label、last-opened 與最後選擇等 Web UI metadata | Persistent |
 | APScheduler | 低頻 scheduler liveness sample | Process |
 | Jinja2 / HTMX / Alpine.js | Server-rendered partials、browser interaction、目前 Thread 的 `EventSource` 與 per-Thread replay cursor | Browser memory / request |
@@ -80,17 +85,19 @@ flowchart LR
 ```mermaid
 flowchart TB
     codex[("Codex Thread store")]
+    journal[(".stream_journal/<thread>/events.jsonl")]
     sqlite[("SQLite metadata")]
     memory["Process memory"]
     workspace[("Project workspace")]
 
-    codex --> codex_data["權威對話資料<br/>Threads、Turns、Goals、Items、messages、diff、usage"]
+    journal --> journal_data["Web Timeline 主要持久來源<br/>messages、commands、tools、順序、durable cursor"]
+    codex --> codex_data["Thread lifecycle、Goal、最終狀態<br/>absent／partial conversation fallback"]
     sqlite --> ui_data["非權威 UI metadata<br/>pin、custom label、last-opened、last selection"]
-    memory --> live_data["暫時執行狀態<br/>active Turn、event replay、subscriber queues、pending Threads"]
+    memory --> live_data["暫時執行狀態<br/>active Turn、subscriber queues、pending Threads"]
     workspace --> files["Project 檔案<br/>Codex 實際讀寫的 CWD"]
 ```
 
-SQLite 不鏡像 prompt、agent response、command output、diff、Goal、token 或 Codex conversation。Event replay、active Turn／Goal handle 與新建後尚未出現在 SDK list 的 pending Thread 都是 process-local；restart 後由 Codex Thread store 重新取得權威歷史與 Goal snapshot。
+SQLite 不鏡像 prompt、agent response、command output、diff、Goal、token 或 Codex conversation。已送往 SSE 的 sequence 來自 Stream Journal，backend restart 後仍可 replay；active Turn／Goal handle、subscriber queue 與新建後尚未出現在 SDK list 的 pending Thread 則仍是 process-local。Journal absent／partial 時才以 Codex history 補 conversation，Journal 獨有的 command／tool activity 不會被覆蓋。
 
 ## Process 與 ASGI lifecycle
 
@@ -139,7 +146,7 @@ Scheduler 與 database 的 cleanup 分別執行；前一項失敗不會略過後
 
 - 每個 Thread 是否已有 active Turn 或 logical Goal operation。
 - Turn／Goal handle、event-pump task 與 shutdown drain。
-- SSE sequence、replay history 與 subscriber queues。
+- SSE subscriber queues 與短期 EventHub cache（durable sequence／replay 已在 Journal）。
 - 尚未出現在 Codex `thread_list` 的 pending Thread。
 
-多 worker 會各自持有不同狀態，因而無法保證「同一 Thread 只有一個 active Turn」、完整 replay 或正確 steer／interrupt。若未來要水平擴展，必須先將 lock、active handle routing、event log 與 subscriber coordination 外部化。
+多 worker 會各自持有不同 active state 與 subscriber，因此仍無法保證「同一 Thread 只有一個 active Turn」或正確 steer／interrupt。Stream Journal 已讓歷史 replay 不依賴單一 process，但要水平擴展仍須外部化 lock、active handle routing 與 subscriber fan-out。
