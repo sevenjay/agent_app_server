@@ -137,6 +137,14 @@ async def test_status_api_and_static_shell_with_codex_disabled() -> None:
         assert "Agents.md" in runtime_status.text
         assert "Account" in runtime_status.text
         assert "Limit" in runtime_status.text
+        assert "Activity history" in runtime_status.text
+        assert "activity records" in runtime_status.text
+        assert "Bytes stored" in runtime_status.text
+        assert "assistant updates" in runtime_status.text
+        assert "Stream Journal" not in runtime_status.text
+        assert runtime_status.text.index('class="card-label">Limit') < runtime_status.text.index(
+            'class="card-label">Activity history'
+        )
         assert runtime_status.text.count('role="tooltip"') == 7
 
         unavailable = await client.get("/api/codex/account")

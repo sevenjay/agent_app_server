@@ -28,18 +28,6 @@
   </article>
   <article class="status-card">
     <div class="status-card-heading">
-      <p class="card-label">Stream Journal</p>
-      <span class="font-mono text-[10px] text-slate-500">durable</span>
-    </div>
-    <strong class="mt-2 block">
-      {{ status.codex.journal.event_count }} events · {{ status.codex.journal.total_bytes }} bytes
-    </strong>
-    <p class="status-detail">
-      {{ status.codex.journal.thread_count }} thread files · {{ status.codex.journal.delta_count }} agent deltas · last load {{ status.codex.journal.last_load_ms }} ms
-    </p>
-  </article>
-  <article class="status-card">
-    <div class="status-card-heading">
       <p class="card-label">Live updates</p>
       <button
         type="button"
@@ -181,5 +169,20 @@
       <strong class="mt-2 block">Unavailable</strong>
       <p class="status-detail">No account limit sample</p>
     {% endif %}
+  </article>
+  <article class="status-card">
+    <div class="status-card-heading">
+      <p class="card-label">Activity history</p>
+      <span class="font-mono text-[10px] text-slate-500">Saved</span>
+    </div>
+    <strong class="mt-2 block">
+      {{ status.codex.journal.event_count }} activity record{% if status.codex.journal.event_count != 1 %}s{% endif %} ·
+      {{ status.codex.journal.total_bytes|filesizeformat }} stored
+    </strong>
+    <p class="status-detail">
+      {{ status.codex.journal.thread_count }} session{% if status.codex.journal.thread_count != 1 %}s{% endif %} ·
+      {{ status.codex.journal.delta_count }} assistant update{% if status.codex.journal.delta_count != 1 %}s{% endif %} ·
+      loaded in {{ status.codex.journal.last_load_ms }} ms
+    </p>
   </article>
 </div>
