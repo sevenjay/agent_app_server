@@ -61,6 +61,8 @@ window.codexConsole = function codexConsole() {
     errorMessage: "",
     mobileTab: "chat",
     conversationTab: "timeline",
+    collapsibleToolCardCount: 0,
+    allToolCardsExpanded: false,
     eventCounter: 0,
     pendingLiveEvents: [],
     liveFlushScheduled: false,
@@ -864,6 +866,8 @@ window.codexConsole = function codexConsole() {
         swap: "innerHTML",
       });
       this.convergeTimelineSnapshot();
+      this.syncToolCardToggleState();
+      this.scheduleToolCardToggleStateSync();
       await htmx.ajax("GET", `/partials/threads/${encoded}/inspector`, {
         target: "#inspector-content",
         swap: "innerHTML",
@@ -1370,6 +1374,7 @@ window.codexConsole = function codexConsole() {
       } else {
         this.liveTimelineItems.splice(index, 1, liveItem);
       }
+      this.scheduleToolCardToggleStateSync();
       if (shouldPin) this.scrollTimelineToBottom();
     },
 
@@ -1461,6 +1466,39 @@ window.codexConsole = function codexConsole() {
         .forEach((card) => {
           card.open = false;
         });
+      this.syncToolCardToggleState();
+    },
+
+    collapsibleToolCards() {
+      return Array.from(
+        document.querySelectorAll("#timeline details.tool-card"),
+      );
+    },
+
+    syncToolCardToggleState() {
+      const cards = this.collapsibleToolCards();
+      this.collapsibleToolCardCount = cards.length;
+      this.allToolCardsExpanded = cards.length > 0 && cards.every((card) => card.open);
+    },
+
+    scheduleToolCardToggleStateSync() {
+      const threadId = this.threadId;
+      window.requestAnimationFrame(() => {
+        if (this.threadId === threadId) this.syncToolCardToggleState();
+      });
+    },
+
+    toggleToolCards() {
+      const cards = this.collapsibleToolCards();
+      if (!cards.length) {
+        this.syncToolCardToggleState();
+        return;
+      }
+      const expand = !cards.every((card) => card.open);
+      cards.forEach((card) => {
+        card.open = expand;
+      });
+      this.syncToolCardToggleState();
     },
 
     bindLiveMessageToTurn(key, turnId, sequence = null) {
@@ -1515,6 +1553,7 @@ window.codexConsole = function codexConsole() {
         (segment) =>
           segment.turnId !== normalizedTurnId && (segment.turnId || this.active),
       );
+      this.scheduleToolCardToggleStateSync();
     },
 
     resetLiveTimeline() {
@@ -1526,6 +1565,7 @@ window.codexConsole = function codexConsole() {
       this.pinTimelineAfterAgentFlush = false;
       this.liveTimelineItems = [];
       this.liveResponseSegment = 0;
+      this.scheduleToolCardToggleStateSync();
     },
 
     resizeComposer(textarea) {
@@ -1998,6 +2038,8 @@ window.codexConsole = function codexConsole() {
     clearThreadPanels() {
       this.modelSettingsOpen = false;
       this.conversationTab = "timeline";
+      this.collapsibleToolCardCount = 0;
+      this.allToolCardsExpanded = false;
       this.liveEvents = [];
       this.pendingLiveEvents = [];
       this.resetLiveTimeline();

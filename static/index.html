@@ -108,76 +108,114 @@
           class="conversation-panel min-h-0 min-w-0"
           :class="{ 'hidden lg:flex': mobileTab !== 'chat' }"
         >
-          <div class="conversation-tabs" role="tablist" aria-label="Conversation views">
+          <div class="conversation-toolbar">
+            <div class="conversation-tabs" role="tablist" aria-label="Conversation views">
+              <button
+                id="conversation-tab-timeline"
+                x-ref="timelineTab"
+                class="conversation-tab"
+                :class="{ 'conversation-tab-active': conversationTab === 'timeline' }"
+                type="button"
+                role="tab"
+                aria-controls="timeline"
+                :aria-selected="conversationTab === 'timeline'"
+                :tabindex="conversationTab === 'timeline' ? 0 : -1"
+                @click="conversationTab = 'timeline'"
+                @keydown.left.prevent="openFilesTab(); $nextTick(() => $refs.filesTab.focus())"
+                @keydown.right.prevent="conversationTab = 'debug'; $nextTick(() => $refs.debugTab.focus())"
+              >
+                Timeline
+              </button>
+              <button
+                id="conversation-tab-debug"
+                x-ref="debugTab"
+                class="conversation-tab"
+                :class="{ 'conversation-tab-active': conversationTab === 'debug' }"
+                type="button"
+                role="tab"
+                aria-controls="live-debug"
+                :aria-selected="conversationTab === 'debug'"
+                :tabindex="conversationTab === 'debug' ? 0 : -1"
+                @click="conversationTab = 'debug'"
+                @keydown.left.prevent="conversationTab = 'timeline'; $nextTick(() => $refs.timelineTab.focus())"
+                @keydown.right.prevent="conversationTab = 'changes'; $nextTick(() => $refs.changesTab.focus())"
+              >
+                <span>Live debug</span>
+                <span
+                  x-cloak
+                  x-show="liveEvents.length > 0"
+                  class="conversation-tab-count"
+                  x-text="liveEvents.length"
+                ></span>
+              </button>
+              <button
+                id="conversation-tab-changes"
+                x-ref="changesTab"
+                class="conversation-tab"
+                :class="{ 'conversation-tab-active': conversationTab === 'changes' }"
+                type="button"
+                role="tab"
+                aria-controls="latest-changes"
+                :aria-selected="conversationTab === 'changes'"
+                :tabindex="conversationTab === 'changes' ? 0 : -1"
+                @click="conversationTab = 'changes'"
+                @keydown.left.prevent="conversationTab = 'debug'; $nextTick(() => $refs.debugTab.focus())"
+                @keydown.right.prevent="openFilesTab(); $nextTick(() => $refs.filesTab.focus())"
+              >
+                Live changes
+              </button>
+              <button
+                id="conversation-tab-files"
+                x-ref="filesTab"
+                class="conversation-tab"
+                :class="{ 'conversation-tab-active': conversationTab === 'files' }"
+                type="button"
+                role="tab"
+                aria-controls="project-files"
+                :aria-selected="conversationTab === 'files'"
+                :tabindex="conversationTab === 'files' ? 0 : -1"
+                @click="openFilesTab()"
+                @keydown.left.prevent="conversationTab = 'changes'; $nextTick(() => $refs.changesTab.focus())"
+                @keydown.right.prevent="conversationTab = 'timeline'; $nextTick(() => $refs.timelineTab.focus())"
+              >
+                Files
+              </button>
+            </div>
             <button
-              id="conversation-tab-timeline"
-              x-ref="timelineTab"
-              class="conversation-tab"
-              :class="{ 'conversation-tab-active': conversationTab === 'timeline' }"
+              x-cloak
+              x-show="conversationTab === 'timeline' && collapsibleToolCardCount > 0"
+              class="tool-card-bulk-toggle"
               type="button"
-              role="tab"
               aria-controls="timeline"
-              :aria-selected="conversationTab === 'timeline'"
-              :tabindex="conversationTab === 'timeline' ? 0 : -1"
-              @click="conversationTab = 'timeline'"
-              @keydown.left.prevent="openFilesTab(); $nextTick(() => $refs.filesTab.focus())"
-              @keydown.right.prevent="conversationTab = 'debug'; $nextTick(() => $refs.debugTab.focus())"
+              :aria-label="allToolCardsExpanded ? 'Collapse all tool cards' : 'Expand all tool cards'"
+              :aria-pressed="allToolCardsExpanded"
+              :title="allToolCardsExpanded ? 'Collapse all tool cards' : 'Expand all tool cards'"
+              @click="toggleToolCards()"
             >
-              Timeline
-            </button>
-            <button
-              id="conversation-tab-debug"
-              x-ref="debugTab"
-              class="conversation-tab"
-              :class="{ 'conversation-tab-active': conversationTab === 'debug' }"
-              type="button"
-              role="tab"
-              aria-controls="live-debug"
-              :aria-selected="conversationTab === 'debug'"
-              :tabindex="conversationTab === 'debug' ? 0 : -1"
-              @click="conversationTab = 'debug'"
-              @keydown.left.prevent="conversationTab = 'timeline'; $nextTick(() => $refs.timelineTab.focus())"
-              @keydown.right.prevent="conversationTab = 'changes'; $nextTick(() => $refs.changesTab.focus())"
-            >
-              <span>Live debug</span>
+              <svg
+                x-show="!allToolCardsExpanded"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                aria-hidden="true"
+              >
+                <path d="m7 8 5-5 5 5M7 16l5 5 5-5"></path>
+              </svg>
+              <svg
+                x-show="allToolCardsExpanded"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                aria-hidden="true"
+              >
+                <path d="m7 3 5 5 5-5M7 21l5-5 5 5"></path>
+              </svg>
               <span
-                x-cloak
-                x-show="liveEvents.length > 0"
-                class="conversation-tab-count"
-                x-text="liveEvents.length"
+                class="hidden sm:inline"
+                x-text="allToolCardsExpanded ? 'Collapse all' : 'Expand all'"
               ></span>
-            </button>
-            <button
-              id="conversation-tab-changes"
-              x-ref="changesTab"
-              class="conversation-tab"
-              :class="{ 'conversation-tab-active': conversationTab === 'changes' }"
-              type="button"
-              role="tab"
-              aria-controls="latest-changes"
-              :aria-selected="conversationTab === 'changes'"
-              :tabindex="conversationTab === 'changes' ? 0 : -1"
-              @click="conversationTab = 'changes'"
-              @keydown.left.prevent="conversationTab = 'debug'; $nextTick(() => $refs.debugTab.focus())"
-              @keydown.right.prevent="openFilesTab(); $nextTick(() => $refs.filesTab.focus())"
-            >
-              Live changes
-            </button>
-            <button
-              id="conversation-tab-files"
-              x-ref="filesTab"
-              class="conversation-tab"
-              :class="{ 'conversation-tab-active': conversationTab === 'files' }"
-              type="button"
-              role="tab"
-              aria-controls="project-files"
-              :aria-selected="conversationTab === 'files'"
-              :tabindex="conversationTab === 'files' ? 0 : -1"
-              @click="openFilesTab()"
-              @keydown.left.prevent="conversationTab = 'changes'; $nextTick(() => $refs.changesTab.focus())"
-              @keydown.right.prevent="conversationTab = 'timeline'; $nextTick(() => $refs.timelineTab.focus())"
-            >
-              Files
             </button>
             <div class="mobile-conversation-status lg:hidden">
               <span class="sr-only" x-text="connectionLabel"></span>
@@ -192,6 +230,7 @@
             role="tabpanel"
             aria-labelledby="conversation-tab-timeline"
             tabindex="0"
+            @toggle.capture="syncToolCardToggleState()"
           >
             <div class="empty-state flex h-full items-center justify-center">
               Choose a session, or create a new one.

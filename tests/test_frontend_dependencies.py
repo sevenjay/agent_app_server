@@ -95,6 +95,7 @@ def test_timeline_live_debug_and_latest_changes_are_separate_tabs() -> None:
     javascript = Path("static/js/codex-console.js").read_text(encoding="utf-8")
 
     assert 'role="tablist"' in html
+    assert 'class="conversation-toolbar"' in html
     assert 'id="conversation-tab-timeline"' in html
     assert 'id="conversation-tab-debug"' in html
     assert 'id="conversation-tab-changes"' in html
@@ -110,6 +111,28 @@ def test_timeline_live_debug_and_latest_changes_are_separate_tabs() -> None:
     assert 'this.conversationTab = "timeline";' in javascript
 
 
+def test_timeline_toolbar_toggles_all_collapsible_tool_cards() -> None:
+    html = Path("static/index.html").read_text(encoding="utf-8")
+    javascript = Path("static/js/codex-console.js").read_text(encoding="utf-8")
+    tailwind = Path("static/src/input.css").read_text(encoding="utf-8")
+
+    tablist_end = html.index("</div>", html.index('role="tablist"'))
+    toggle_start = html.index('class="tool-card-bulk-toggle"')
+    assert toggle_start > tablist_end
+    assert 'aria-controls="timeline"' in html
+    assert "Expand all tool cards" in html
+    assert "Collapse all tool cards" in html
+    assert '@click="toggleToolCards()"' in html
+    assert '@toggle.capture="syncToolCardToggleState()"' in html
+    assert 'class="hidden sm:inline"' in html
+    assert "collapsibleToolCardCount: 0" in javascript
+    assert "allToolCardsExpanded: false" in javascript
+    assert 'document.querySelectorAll("#timeline details.tool-card")' in javascript
+    assert "const expand = !cards.every((card) => card.open);" in javascript
+    assert "card.open = expand;" in javascript
+    assert ".tool-card-bulk-toggle" in tailwind
+
+
 def test_files_tab_provides_lazy_tree_and_guarded_file_operations() -> None:
     html = Path("static/index.html").read_text(encoding="utf-8")
     javascript = Path("static/js/codex-console.js").read_text(encoding="utf-8")
@@ -118,7 +141,8 @@ def test_files_tab_provides_lazy_tree_and_guarded_file_operations() -> None:
     assert 'id="conversation-tab-files"' in html
     assert 'id="project-files"' in html
     assert 'x-show="conversationTab === \'files\'"' in html
-    assert html.index("Live changes") < html.index('>\n              Files\n')
+    files_tab_start = html.index('id="conversation-tab-files"')
+    assert html.index("Live changes") < html.index("Files", files_tab_start)
     assert "Upload files" in html
     assert "New folder" in html
     assert ">Refresh</button>" in html
