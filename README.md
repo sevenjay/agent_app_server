@@ -22,6 +22,7 @@ Web console 觀察到的對話與執行軌跡會先寫入各 Project 的 per-thr
 - **Long-running Goals**：可從 Inspector 或 composer `/goal` 指令啟動、查看、暫停、恢復與清除 Goal。
 - **檔案管理**：在 Files 分頁瀏覽 Project tree、上傳／下載檔案、新增資料夾、重新命名與刪除項目。
 - **執行檢視**：Timeline、Live debug、Live changes 與 Files 四個工作區視圖，支援桌面與手機版面。
+- **手機 PWA**：可加入 iOS／Android 主畫面，並以隱藏瀏覽器網址列的獨立視窗啟動。
 - **Runtime 狀態**：顯示 Codex account、usage limits、模型、reasoning effort 與服務 health。
 
 ## 快速開始
@@ -90,6 +91,15 @@ scripts/run.sh
 5. 長時間工作可用 Inspector 的 Goal 控制項，或輸入 `/goal <objective>`；輸入 `/goal` 可查看目前狀態。
 
 同一個 Session 同時間只允許一個活動 Turn 或 Goal operation；不同 Sessions 可以並行執行。
+
+### 安裝到手機主畫面
+
+正式環境需先透過 HTTPS 提供 Web console；一般區域網路 IP 上的 HTTP 不符合 PWA 的安全來源要求。
+
+- iPhone／iPad：使用 Safari 開啟，點「分享」→「加入主畫面」。
+- Android：使用 Chrome 開啟，點選單中的「安裝應用程式」或「加到主畫面」。
+
+從新增的主畫面圖示啟動後，Web console 會以 `standalone` 模式開啟，不顯示瀏覽器網址列。
 
 ## 安全與資料邊界
 

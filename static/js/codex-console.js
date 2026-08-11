@@ -1,5 +1,82 @@
 "use strict";
 
+window.registerPwaServiceWorker = function registerPwaServiceWorker() {
+  if (!("serviceWorker" in navigator)) return Promise.resolve(null);
+
+  if (!window.pwaServiceWorkerRegistration) {
+    window.pwaServiceWorkerRegistration = navigator.serviceWorker
+      .register("/service-worker.js")
+      .catch((error) => {
+        window.pwaServiceWorkerRegistration = null;
+        throw error;
+      });
+  }
+  return window.pwaServiceWorkerRegistration;
+};
+
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    window.registerPwaServiceWorker().catch((error) => {
+      console.warn("Service worker registration failed.", error);
+    });
+  });
+}
+
+window.pwaDiagnostics = function pwaDiagnostics() {
+  const requested = new URLSearchParams(window.location.search).get("pwa-debug") === "1";
+  if (requested) window.localStorage.setItem("pwa-debug", "1");
+
+  return {
+    visible: requested || window.localStorage.getItem("pwa-debug") === "1",
+    url: window.location.href,
+    secureContext: window.isSecureContext,
+    serviceWorkerSupported: "serviceWorker" in navigator,
+    serviceWorkerReady: false,
+    serviceWorkerScope: "",
+    displayMode: "browser",
+    error: "",
+
+    init() {
+      this.refreshDisplayMode();
+      if (!this.visible || !this.serviceWorkerSupported) return;
+      this.refreshServiceWorker();
+    },
+
+    close() {
+      this.visible = false;
+      window.localStorage.removeItem("pwa-debug");
+    },
+
+    refreshDisplayMode() {
+      if (window.matchMedia("(display-mode: fullscreen)").matches) {
+        this.displayMode = "fullscreen";
+      } else if (window.matchMedia("(display-mode: standalone)").matches) {
+        this.displayMode = "standalone";
+      } else {
+        this.displayMode = "browser";
+      }
+    },
+
+    async refreshServiceWorker() {
+      this.secureContext = window.isSecureContext;
+      this.serviceWorkerSupported = "serviceWorker" in navigator;
+      this.refreshDisplayMode();
+      this.error = "";
+      if (!this.serviceWorkerSupported) return;
+
+      try {
+        const registration = await window.registerPwaServiceWorker();
+        this.serviceWorkerReady = Boolean(registration);
+        this.serviceWorkerScope = registration?.scope || "";
+      } catch (error) {
+        this.serviceWorkerReady = false;
+        this.serviceWorkerScope = "";
+        this.error = String(error?.message || error);
+      }
+    },
+  };
+};
+
 window.renderMarkdown = function renderMarkdown(source) {
   const markdown = String(source || "");
   if (!window.marked || !window.DOMPurify) {

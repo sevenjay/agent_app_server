@@ -128,6 +128,19 @@ async def test_status_api_and_static_shell_with_codex_disabled() -> None:
         assert "htmx.org@2.0.4" in shell.text
         assert "alpinejs@3.14.9" in shell.text
 
+        manifest = await client.get("/manifest.webmanifest")
+        assert manifest.status_code == 200
+        assert manifest.headers["content-type"].startswith("application/manifest+json")
+        assert manifest.json()["display"] == "standalone"
+
+        service_worker = await client.get("/service-worker.js")
+        assert service_worker.status_code == 200
+        assert service_worker.headers["content-type"].startswith(
+            "application/javascript"
+        )
+        assert service_worker.headers["cache-control"] == "no-cache"
+        assert service_worker.headers["service-worker-allowed"] == "/"
+
         runtime_status = await client.get("/partials/codex/status")
         assert runtime_status.status_code == 200
         assert "Runtime health" in runtime_status.text

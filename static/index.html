@@ -5,6 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>Codex Console · Agent App Server</title>
     <meta name="description" content="在受信任工作站上管理 Codex sessions、turns 與即時執行事件">
+    <meta name="theme-color" content="#0f141a">
+    <meta name="color-scheme" content="dark">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Codex Console">
+    <meta name="format-detection" content="telephone=no">
+
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="icon" href="/static/icons/icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/icons/apple-touch-icon.png">
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -31,6 +42,50 @@
     x-data="codexConsole()"
     @htmx:response-error.window="handleHtmxError($event)"
   >
+    <aside
+      x-data="pwaDiagnostics()"
+      x-cloak
+      x-show="visible"
+      class="pwa-debug-panel"
+      aria-labelledby="pwa-debug-title"
+    >
+      <div class="pwa-debug-header">
+        <div>
+          <p class="section-kicker">Diagnostics</p>
+          <h2 id="pwa-debug-title">PWA Debug</h2>
+        </div>
+        <button type="button" @click="close()" aria-label="Close PWA diagnostics">×</button>
+      </div>
+      <dl class="pwa-debug-grid">
+        <div>
+          <dt>URL</dt>
+          <dd x-text="url"></dd>
+        </div>
+        <div>
+          <dt>Secure context</dt>
+          <dd :class="secureContext ? 'pwa-debug-ok' : 'pwa-debug-bad'" x-text="String(secureContext)"></dd>
+        </div>
+        <div>
+          <dt>Service Worker supported</dt>
+          <dd :class="serviceWorkerSupported ? 'pwa-debug-ok' : 'pwa-debug-bad'" x-text="String(serviceWorkerSupported)"></dd>
+        </div>
+        <div>
+          <dt>Service Worker ready</dt>
+          <dd :class="serviceWorkerReady ? 'pwa-debug-ok' : 'pwa-debug-bad'" x-text="String(serviceWorkerReady)"></dd>
+        </div>
+        <div>
+          <dt>Display mode</dt>
+          <dd :class="displayMode !== 'browser' ? 'pwa-debug-ok' : ''" x-text="displayMode"></dd>
+        </div>
+        <div>
+          <dt>Service Worker scope</dt>
+          <dd x-text="serviceWorkerScope || '—'"></dd>
+        </div>
+      </dl>
+      <p x-show="error" class="pwa-debug-error" x-text="error"></p>
+      <button type="button" class="secondary-button" @click="refreshServiceWorker()">Refresh diagnostics</button>
+    </aside>
+
     <div class="app-shell">
       <div
         x-cloak

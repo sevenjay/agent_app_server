@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Codex Console">
+  <rect width="512" height="512" rx="112" fill="#0f141a"/>
+  <path d="M376 168a156 156 0 1 0 0 176" fill="none" stroke="#36d2d2" stroke-linecap="round" stroke-width="72"/>
+  <circle cx="376" cy="168" r="36" fill="#7bd789"/>
+  <circle cx="376" cy="344" r="36" fill="#7bd789"/>
+</svg>

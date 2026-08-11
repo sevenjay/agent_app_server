@@ -1,3 +1,4 @@
+import json
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -67,6 +68,44 @@ def test_console_uses_local_javascript_without_application_bundler() -> None:
     assert '@source "../js/**/*.js";' in tailwind
     assert "overflow-hidden" in html
     assert "min-w-0" in html
+
+
+def test_console_is_installable_as_a_standalone_pwa() -> None:
+    html = Path("static/index.html").read_text(encoding="utf-8")
+    javascript = Path("static/js/codex-console.js").read_text(encoding="utf-8")
+    worker = Path("static/service-worker.js").read_text(encoding="utf-8")
+    manifest = json.loads(
+        Path("static/manifest.webmanifest").read_text(encoding="utf-8")
+    )
+
+    assert '<link rel="manifest" href="/manifest.webmanifest">' in html
+    assert '<meta name="mobile-web-app-capable" content="yes">' in html
+    assert '<meta name="apple-mobile-web-app-capable" content="yes">' in html
+    assert 'name="apple-mobile-web-app-status-bar-style"' in html
+    assert '<link rel="apple-touch-icon"' in html
+    assert '.register("/service-worker.js")' in javascript
+    assert 'x-data="pwaDiagnostics()"' in html
+    assert 'new URLSearchParams(window.location.search).get("pwa-debug") === "1"' in javascript
+    assert 'window.localStorage.setItem("pwa-debug", "1")' in javascript
+    assert "window.isSecureContext" in javascript
+    assert 'window.matchMedia("(display-mode: standalone)")' in javascript
+    assert "serviceWorkerReady" in javascript
+    expected_origin = "http://192.168.50.234:8080/"
+    assert manifest["id"] == expected_origin
+    assert manifest["start_url"] == expected_origin
+    assert manifest["scope"] == expected_origin
+    assert manifest["display"] == "standalone"
+    assert {icon["purpose"] for icon in manifest["icons"]} >= {"any", "maskable"}
+    for icon in manifest["icons"]:
+        path = Path(icon["src"].removeprefix("/"))
+        png = path.read_bytes()
+        width = int.from_bytes(png[16:20], byteorder="big")
+        height = int.from_bytes(png[20:24], byteorder="big")
+        expected_size = int(icon["sizes"].split("x", maxsplit=1)[0])
+        assert png.startswith(b"\x89PNG\r\n\x1a\n")
+        assert (width, height) == (expected_size, expected_size)
+    assert 'self.addEventListener("install"' in worker
+    assert 'self.addEventListener("fetch"' in worker
 
 
 def test_session_switch_replays_from_per_thread_event_cursor() -> None:

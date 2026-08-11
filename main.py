@@ -377,6 +377,7 @@ def create_app(
                 "object-src 'none'",
                 "frame-ancestors 'none'",
                 "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com",
+                "worker-src 'self'",
                 "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
                 "font-src 'self' data: https://fonts.gstatic.com",
                 "connect-src 'self'",
@@ -390,6 +391,24 @@ def create_app(
     @application.get("/", include_in_schema=False)
     async def index() -> FileResponse:
         return FileResponse(STATIC_DIR / "index.html")
+
+    @application.get("/manifest.webmanifest", include_in_schema=False)
+    async def web_app_manifest() -> FileResponse:
+        return FileResponse(
+            STATIC_DIR / "manifest.webmanifest",
+            media_type="application/manifest+json",
+        )
+
+    @application.get("/service-worker.js", include_in_schema=False)
+    async def service_worker() -> FileResponse:
+        return FileResponse(
+            STATIC_DIR / "service-worker.js",
+            media_type="application/javascript",
+            headers={
+                "Cache-Control": "no-cache",
+                "Service-Worker-Allowed": "/",
+            },
+        )
 
     @application.get("/api/status")
     async def api_status(

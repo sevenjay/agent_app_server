@@ -1,0 +1,32 @@
+{
+  "id": "http://192.168.50.234:8080/",
+  "name": "Codex Console",
+  "short_name": "Codex",
+  "description": "在受信任工作站上管理 Codex sessions、turns 與即時執行事件",
+  "lang": "zh-TW",
+  "start_url": "http://192.168.50.234:8080/",
+  "scope": "http://192.168.50.234:8080/",
+  "display": "standalone",
+  "background_color": "#101419",
+  "theme_color": "#0f141a",
+  "icons": [
+    {
+      "src": "/static/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/static/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/static/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

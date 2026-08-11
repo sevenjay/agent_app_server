@@ -1910,6 +1910,85 @@
     z-index: 50;
   }
 
+  .pwa-debug-panel {
+    background: color-mix(in oklab, var(--color-surface-900) 97%, transparent);
+    border: 1px solid var(--color-surface-600);
+    border-radius: 0.85rem;
+    box-shadow: 0 1rem 3rem oklch(0.08 0.01 250 / 0.65);
+    left: 50%;
+    max-height: calc(100dvh - 2rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    overflow-y: auto;
+    padding: 1rem;
+    position: fixed;
+    top: calc(1rem + env(safe-area-inset-top));
+    transform: translateX(-50%);
+    width: min(32rem, calc(100vw - 2rem));
+    z-index: 70;
+  }
+
+  .pwa-debug-header {
+    align-items: flex-start;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  .pwa-debug-header h2 {
+    color: white;
+    font-size: 1rem;
+    font-weight: 600;
+    margin-top: 0.2rem;
+  }
+
+  .pwa-debug-header button {
+    color: oklch(0.7 0.02 250);
+    font-size: 1.25rem;
+    height: 2rem;
+    width: 2rem;
+  }
+
+  .pwa-debug-grid {
+    display: grid;
+    gap: 0.55rem;
+    margin: 1rem 0;
+  }
+
+  .pwa-debug-grid > div {
+    background: var(--color-surface-950);
+    border: 1px solid var(--color-surface-700);
+    border-radius: 0.55rem;
+    min-width: 0;
+    padding: 0.65rem 0.7rem;
+  }
+
+  .pwa-debug-grid dt {
+    color: oklch(0.58 0.02 250);
+    font-size: 0.65rem;
+  }
+
+  .pwa-debug-grid dd {
+    color: oklch(0.86 0.02 250);
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    margin-top: 0.2rem;
+    overflow-wrap: anywhere;
+  }
+
+  .pwa-debug-grid .pwa-debug-ok {
+    color: var(--color-signal-400);
+  }
+
+  .pwa-debug-grid .pwa-debug-bad,
+  .pwa-debug-error {
+    color: oklch(0.78 0.14 35);
+  }
+
+  .pwa-debug-error {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    margin-bottom: 0.8rem;
+    overflow-wrap: anywhere;
+  }
+
   .live-event {
     border-left: 2px solid var(--color-surface-600);
     margin: 0.4rem 0;
