@@ -15,7 +15,7 @@ from openai_codex import ApprovalMode, AsyncCodex, Sandbox
 from openai_codex.generated.v2_all import GetAccountRateLimitsResponse
 
 from codex_serializers import field, notification_view, to_primitive
-from codex_service import CodexService, ConsoleUnavailable
+from codex_service import CodexService, ConsoleNotFound, ConsoleUnavailable
 from event_hub import EventHub
 from projects import ProjectRegistry
 from stream_journal import StreamJournal
@@ -493,11 +493,16 @@ class CodexRuntime:
                 service = self.service
                 if service is None:
                     continue
-                await service.publish_notification(
-                    thread_id,
-                    method=method,
-                    data=data,
-                )
+                try:
+                    await service.publish_notification(
+                        thread_id,
+                        method=method,
+                        data=data,
+                    )
+                except ConsoleNotFound:
+                    # Ephemeral helper threads are intentionally absent from the
+                    # project session list and must not stop the global pump.
+                    continue
         except asyncio.CancelledError:
             LOGD("codex_global_notifications_cancelled")
             raise

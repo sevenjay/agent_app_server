@@ -602,12 +602,23 @@ def create_app(
         LOGD(
             f"console_thread_create_start request_id={_request_id(request)} "
             f"project_key={command.project_key} has_name={command.name is not None} "
+            f"has_initial_prompt={command.initial_prompt is not None} "
             f"model_selected={command.model is not None}"
         )
-        thread = await _service(request).create_thread(
-            project_key=command.project_key,
-            name=command.name,
-            model=command.model,
+        service = _service(request)
+        thread = (
+            await service.create_thread_from_prompt(
+                project_key=command.project_key,
+                prompt=command.initial_prompt,
+                model=command.model,
+                reasoning_effort=command.reasoning_effort,
+            )
+            if command.initial_prompt is not None
+            else await service.create_thread(
+                project_key=command.project_key,
+                name=command.name,
+                model=command.model,
+            )
         )
         metadata = await _touch_thread_metadata(session, thread, opened=True)
         decorated = _decorate_thread(thread, metadata)
@@ -1146,6 +1157,18 @@ def create_app(
             request,
             "_composer.html",
             await _thread_partial_context(request, thread_id, session),
+        )
+
+    @application.get(
+        "/partials/composer/draft",
+        response_class=HTMLResponse,
+        dependencies=[Depends(require_web_user)],
+    )
+    async def draft_composer_partial(request: Request):
+        return templates.TemplateResponse(
+            request,
+            "_composer.html",
+            {"thread": None, "active": None},
         )
 
     return application

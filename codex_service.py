@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 import uuid
 from dataclasses import dataclass
@@ -30,6 +31,24 @@ from turn_manager import (
     TurnsUnavailableError,
 )
 from utility.log import LOGD, LOGW
+
+
+SESSION_TITLE_MODEL = "gpt-5.6-luna"
+SESSION_TITLE_REASONING_EFFORT = "low"
+_SESSION_TITLE_DEVELOPER_INSTRUCTIONS = """
+Create a concise session title that summarizes the user's first message.
+Use the same language as the user. Return only the requested structured output.
+The title must be specific, contain no quotation marks or terminal punctuation,
+and be no longer than 80 characters.
+""".strip()
+_SESSION_TITLE_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "title": {"type": "string", "minLength": 1, "maxLength": 80},
+    },
+    "required": ["title"],
+    "additionalProperties": False,
+}
 
 
 def _is_unmaterialized_thread_error(exc: BaseException) -> bool:
@@ -134,6 +153,7 @@ class CodexService:
         self._thread_projects: dict[str, Project] = {}
         self._publish_lock = asyncio.Lock()
         self._recent_stream_fingerprints: dict[str, tuple[str, float]] = {}
+        self._ignored_notification_threads: set[str] = set()
 
     async def _fan_out_record(self, record: dict[str, Any]) -> EventEnvelope | None:
         thread_id = str(record["thread_id"])
@@ -209,6 +229,8 @@ class CodexService:
         turn_id: str | None = None,
         channel: str = "global",
     ) -> EventEnvelope | None:
+        if thread_id in self._ignored_notification_threads:
+            return None
         if turn_id is None:
             turn_id = str(data.get("turn_id") or data.get("turnId") or "") or None
         if turn_id is None:
@@ -565,6 +587,92 @@ class CodexService:
         )
         LOGD(f"codex_thread_create_complete project_key={project.key} thread_id={view['id']}")
         return view
+
+    async def _generate_session_title(self, project: Project, prompt: str) -> str:
+        LOGD(
+            "codex_session_title_start "
+            f"project_key={project.key} model={SESSION_TITLE_MODEL} "
+            f"reasoning_effort={SESSION_TITLE_REASONING_EFFORT}"
+        )
+        naming_thread = await self._call(
+            self.codex.thread_start(
+                cwd=str(project.path),
+                model=SESSION_TITLE_MODEL,
+                ephemeral=True,
+                developer_instructions=_SESSION_TITLE_DEVELOPER_INSTRUCTIONS,
+                approval_mode=ApprovalMode.deny_all,
+                sandbox=Sandbox.read_only,
+            ),
+            operation="session_title_thread_start",
+        )
+        naming_thread_id = str(field(naming_thread, "id", ""))
+        if naming_thread_id:
+            if len(self._ignored_notification_threads) >= 2_000:
+                self._ignored_notification_threads.pop()
+            self._ignored_notification_threads.add(naming_thread_id)
+        result = await self._call(
+            naming_thread.run(
+                prompt,
+                model=SESSION_TITLE_MODEL,
+                effort=SESSION_TITLE_REASONING_EFFORT,
+                output_schema=_SESSION_TITLE_OUTPUT_SCHEMA,
+                approval_mode=ApprovalMode.deny_all,
+                sandbox=Sandbox.read_only,
+            ),
+            operation="session_title_generate",
+        )
+        raw_response = field(result, "final_response")
+        if not isinstance(raw_response, str):
+            raise ConsoleUnavailable
+        try:
+            payload = json.loads(raw_response)
+        except (json.JSONDecodeError, TypeError) as exc:
+            raise ConsoleUnavailable from exc
+        title = payload.get("title") if isinstance(payload, dict) else None
+        if not isinstance(title, str):
+            raise ConsoleUnavailable
+        normalized = " ".join(title.split()).strip(" \t\r\n\"'")
+        if not normalized:
+            raise ConsoleUnavailable
+        normalized = normalized[:200].rstrip()
+        LOGD(
+            "codex_session_title_complete "
+            f"project_key={project.key} title_length={len(normalized)}"
+        )
+        return normalized
+
+    async def create_thread_from_prompt(
+        self,
+        *,
+        project_key: str,
+        prompt: str,
+        model: str | None,
+        reasoning_effort: str | None,
+    ) -> dict[str, Any]:
+        project = self._project(project_key)
+        title = await self._generate_session_title(project, prompt)
+        thread = await self.create_thread(
+            project_key=project_key,
+            name=title,
+            model=model,
+        )
+        try:
+            turn = await self.start_turn(
+                str(thread["id"]),
+                prompt=prompt,
+                model=model,
+                reasoning_effort=reasoning_effort,
+            )
+        except (asyncio.CancelledError, Exception):
+            try:
+                await self.delete_thread(str(thread["id"]))
+            except ConsoleServiceError as cleanup_error:
+                LOGW(
+                    "Failed to remove a session after its initial turn failed: "
+                    f"thread_id={thread['id']} exception={type(cleanup_error).__name__}"
+                )
+            raise
+        return {**thread, **turn}
 
     @staticmethod
     def _journal_envelope(record: dict[str, Any]) -> EventEnvelope:

@@ -38,6 +38,7 @@ window.codexConsole = function codexConsole() {
     sessionStatus: { type: "idle", activeFlags: [] },
     models: [],
     archived: false,
+    draftSession: false,
     prompt: "",
     active: false,
     runningThreadIds: [],
@@ -831,6 +832,7 @@ window.codexConsole = function codexConsole() {
 
     async selectThread(threadId) {
       this.modelSettingsOpen = false;
+      this.draftSession = false;
       this.errorMessage = "";
       this.threadId = threadId;
       this.mobileTab = "chat";
@@ -949,7 +951,7 @@ window.codexConsole = function codexConsole() {
         });
         await this.refreshProjects();
         await this.selectProject(project.key);
-        await this.createThread(null);
+        await this.newThread();
       } catch (error) {
         this.showError(error);
       } finally {
@@ -962,28 +964,26 @@ window.codexConsole = function codexConsole() {
         this.errorMessage = "Choose a project first.";
         return;
       }
-      const requestedName = window.prompt("Session name (optional)");
-      if (requestedName === null) return;
-      await this.createThread(requestedName.trim() || null);
-    },
-
-    async createThread(name) {
+      this.threadId = "";
+      this.prompt = "";
+      this.closeEvents();
+      this.clearThreadPanels();
+      this.draftSession = true;
+      this.mobileTab = "chat";
+      document.querySelector("#timeline").textContent =
+        "Send your first message to create this session.";
       try {
-        this.busy = true;
-        const thread = await this.api("/api/codex/threads", {
-          method: "POST",
-          body: JSON.stringify({
-            project_key: this.projectKey,
-            name,
-            model: this.model || null,
-          }),
+        await this.savePreferences({ selected_thread_id: null }).catch(() => {});
+        await htmx.ajax("GET", "/partials/composer/draft", {
+          target: "#composer",
+          swap: "innerHTML",
         });
-        await this.refreshThreads();
-        await this.selectThread(thread.id);
+        window.requestAnimationFrame(() => {
+          document.querySelector("#composer-prompt")?.focus();
+        });
       } catch (error) {
+        this.draftSession = false;
         this.showError(error);
-      } finally {
-        this.busy = false;
       }
     },
 
@@ -1607,7 +1607,12 @@ window.codexConsole = function codexConsole() {
 
     async submitPrompt() {
       const text = this.prompt.trim();
-      if (!text || !this.threadId || this.busy) return;
+      if (!text || this.busy) return;
+      if (this.draftSession && !this.threadId) {
+        await this.submitDraftPrompt(text);
+        return;
+      }
+      if (!this.threadId) return;
       if (text === "/goal" || text.startsWith("/goal ")) {
         await this.handleGoalCommand(text);
         return;
@@ -1662,6 +1667,32 @@ window.codexConsole = function codexConsole() {
           this.syncSessionStatus(threadId, "error");
           this.prompt = text;
         }
+        this.showError(error);
+      } finally {
+        this.busy = false;
+      }
+    },
+
+    async submitDraftPrompt(text) {
+      this.prompt = "";
+      this.busy = true;
+      document.querySelector("#timeline").textContent = "Naming session…";
+      try {
+        const thread = await this.api("/api/codex/threads", {
+          method: "POST",
+          body: JSON.stringify({
+            project_key: this.projectKey,
+            model: this.model || null,
+            reasoning_effort: this.reasoningEffort || null,
+            initial_prompt: text,
+          }),
+        });
+        this.markRunning(thread.id, Boolean(thread.accepted));
+        await this.selectThread(thread.id);
+      } catch (error) {
+        this.prompt = text;
+        document.querySelector("#timeline").textContent =
+          "Send your first message to create this session.";
         this.showError(error);
       } finally {
         this.busy = false;
@@ -2041,6 +2072,8 @@ window.codexConsole = function codexConsole() {
 
     clearThreadPanels() {
       this.modelSettingsOpen = false;
+      this.draftSession = false;
+      this.active = false;
       this.conversationTab = "timeline";
       this.collapsibleToolCardCount = 0;
       this.allToolCardsExpanded = false;

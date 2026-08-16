@@ -1,7 +1,7 @@
 <form
   class="composer-shell"
-  data-thread-id="{{ thread.id }}"
-  x-init='syncThreadActive({{ thread.id|tojson }}, {{ "true" if active else "false" }}, {{ active.get("model")|tojson if active else "null" }}, {{ active.get("reasoning_effort")|tojson if active else "null" }}, {{ active.get("kind")|tojson if active else "null" }}); $watch("prompt", () => $nextTick(() => resizeComposer($refs.composerInput))); $nextTick(() => resizeComposer($refs.composerInput))'
+  data-thread-id="{{ thread.id if thread else '' }}"
+  x-init='{% if thread %}syncThreadActive({{ thread.id|tojson }}, {{ "true" if active else "false" }}, {{ active.get("model")|tojson if active else "null" }}, {{ active.get("reasoning_effort")|tojson if active else "null" }}, {{ active.get("kind")|tojson if active else "null" }}); {% endif %}$watch("prompt", () => $nextTick(() => resizeComposer($refs.composerInput))); $nextTick(() => resizeComposer($refs.composerInput))'
   @submit.prevent="submitPrompt()"
 >
   <div class="composer-surface">
@@ -98,7 +98,7 @@
         <button
           type="submit"
           class="composer-submit"
-          :disabled="busy || (!active && !streamReady) || !prompt.trim()"
+          :disabled="busy || (!draftSession && !active && !streamReady) || !prompt.trim()"
           :aria-label="active ? 'Steer' : 'Send'"
           :title="active ? 'Steer' : 'Send'"
         >

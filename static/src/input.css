@@ -245,7 +245,7 @@
     border: 1px solid transparent;
     border-radius: 0.65rem;
     display: flex;
-    padding: 0.7rem 0.75rem;
+    padding: 0.5rem 0.65rem;
     text-align: left;
     transition: background-color 150ms, border-color 150ms;
     width: 100%;
@@ -269,7 +269,7 @@
     flex: 1;
     flex-direction: column;
     min-width: 0;
-    padding: 0.7rem 0.35rem 0.7rem 0.75rem;
+    padding: 0.5rem 0.3rem 0.5rem 0.65rem;
     text-align: left;
   }
 
@@ -288,7 +288,7 @@
     align-items: flex-start;
     display: flex;
     flex: none;
-    padding: 0.45rem 0.35rem 0 0;
+    padding: 0.25rem 0.3rem 0 0;
   }
 
   .session-actions-trigger {
