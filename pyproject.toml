@@ -1,6 +1,6 @@
 [project]
 name = "agent-app-server"
-version = "0.1.0"
+version = "0.1.1"
 description = "Single-user responsive Web console for OpenAI Codex threads and turns"
 authors = [{name = "sevenjay"}]
 readme = "README.md"

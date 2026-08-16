@@ -460,7 +460,7 @@
             <span
               class="app-version hidden lg:block"
               title="Application version"
-              x-text="appVersion"
+              x-text="appVersion ? `v${appVersion}` : ''"
             ></span>
             <p
               class="truncate text-sm font-semibold text-white lg:hidden"

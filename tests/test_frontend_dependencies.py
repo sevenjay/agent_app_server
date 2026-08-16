@@ -440,7 +440,7 @@ def test_inspector_header_is_compact_and_shows_the_application_version() -> None
 
     assert 'class="app-header inspector-header"' in inspector_header
     assert 'class="app-version hidden lg:block"' in inspector_header
-    assert 'x-text="appVersion"' in inspector_header
+    assert 'x-text="appVersion ? `v${appVersion}` : \'\'"' in inspector_header
     assert "appVersion: \"\"" in javascript
     assert 'this.api("/api/status")' in javascript
     assert 'this.appVersion = String(status.version || "");' in javascript

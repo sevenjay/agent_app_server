@@ -32,7 +32,7 @@ from codex_service import (
     ConsoleProjectUnavailable,
     ConsoleServiceError,
 )
-from config import BASE_DIR, environment_settings, settings
+from config import APP_VERSION, BASE_DIR, environment_settings, settings
 from database import database_status, dispose_engine, get_session, init_db
 from event_hub import EventEnvelope
 from models import AppSetting, ThreadUIMetadata
@@ -192,7 +192,7 @@ async def _status_payload(
     runtime: CodexRuntime = request.app.state.codex_runtime
     return {
         "service": str(getattr(settings, "app_name", "agent_app_server")),
-        "version": str(getattr(settings, "app_version", "0.1.0")),
+        "version": APP_VERSION,
         "environment": str(settings.current_env),
         "time_utc": datetime.now(timezone.utc).isoformat(),
         "database": await database_status(session),
@@ -256,7 +256,7 @@ def create_app(
 
     application = FastAPI(
         title=str(getattr(settings, "app_name", "agent_app_server")),
-        version=str(getattr(settings, "app_version", "0.1.0")),
+        version=APP_VERSION,
         lifespan=lifespan,
     )
     application.state.codex_runtime = codex_runtime
@@ -1161,7 +1161,7 @@ def _main() -> None:
     modified = time.strptime(time.ctime(os.path.getmtime("main.py")))
     modify_time = time.strftime("%H:%M:%S %m-%d", modified)
     LOGI(
-        f"==== version {settings.app_version}  {modify_time}, "
+        f"==== version {APP_VERSION}  {modify_time}, "
         f"env: {settings.current_env} =========================================="
     )
 
