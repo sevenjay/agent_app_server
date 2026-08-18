@@ -8,8 +8,15 @@ Web console 觀察到的對話與執行軌跡會先寫入各 Project 的 per-thr
 > 目前的 `require_web_user` 只是預留的整合接點，不是正式的使用者驗證。development 綁定 `127.0.0.1:8080`，但目前版本庫內的 production 設定會綁定 `0.0.0.0:8080`。在補上 authentication、TLS 與受信任的存取層，或改回 loopback 以前，請勿將服務直接公開到 Internet。
 
 ## Screenshot
-<img width="1857" height="992" alt="image" src="https://github.com/user-attachments/assets/7e8daea0-36f2-4675-8fd5-0f2939d14890" />
-
+<p align="center">
+  <img width="95%" height="992" alt="image" src="https://github.com/user-attachments/assets/7e8daea0-36f2-4675-8fd5-0f2939d14890" />
+  <img width="30%" height="2712" alt="Screenshot_2026-08-18-11-28-10-486_org mozilla firefox" src="https://github.com/user-attachments/assets/78c60385-119e-45f3-a1e1-ccf1339342d5" />
+  <img width="30%" height="2712" alt="Screenshot_2026-08-18-11-29-54-017_org mozilla firefox" src="https://github.com/user-attachments/assets/2812f048-ec5d-4bd7-a88f-54c8603bc1a9" />
+  <img width="30%" height="2712" alt="Screenshot_2026-08-18-11-30-58-386_org mozilla firefox" src="https://github.com/user-attachments/assets/0a7404cb-6857-4c51-a66d-c239beda6b4f" />
+  <img width="30%" height="2712" alt="Screenshot_2026-08-18-11-32-08-267_org mozilla firefox" src="https://github.com/user-attachments/assets/4a9349f8-5faf-4d37-b613-4251ad824de2" />
+  <img width="30%" height="2712" alt="Screenshot_2026-08-18-11-42-17-683_org mozilla firefox" src="https://github.com/user-attachments/assets/4f998e58-713b-41fd-971d-803f57b94006" />
+  <img width="30%" height="2712" alt="Screenshot_2026-08-18-11-42-42-349_org mozilla firefox" src="https://github.com/user-attachments/assets/622b69aa-c32f-46be-9ca0-5fd918eed0c9" />
+</p>
 
 
 
