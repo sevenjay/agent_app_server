@@ -309,6 +309,9 @@ class CodexRuntime:
                 operation_timeout=float(
                     getattr(self.settings, "codex_operation_timeout_seconds", 30)
                 ),
+                turn_idle_reconcile_seconds=float(
+                    getattr(self.settings, "codex_turn_idle_reconcile_seconds", 2)
+                ),
                 lookup_page_limit=int(
                     getattr(self.settings, "codex_thread_lookup_page_limit", 50)
                 ),

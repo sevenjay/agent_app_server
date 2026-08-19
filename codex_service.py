@@ -66,6 +66,17 @@ def _is_thread_not_loaded_error(exc: BaseException) -> bool:
     return "thread not loaded" in exc.message.lower()
 
 
+def _is_stale_turn_interrupt_error(exc: BaseException | None) -> bool:
+    """Return whether Codex rejected an interrupt for an obsolete handle."""
+    if not isinstance(exc, InvalidRequestError) or exc.code != -32600:
+        return False
+    message = exc.message.lower()
+    return (
+        "expected active turn id" in message
+        or "no active turn to interrupt" in message
+    )
+
+
 class ConsoleServiceError(RuntimeError):
     status_code = 500
     code = "console_error"
@@ -137,6 +148,7 @@ class CodexService:
         stream_journal: StreamJournal | None = None,
         goal_adapter: Any | None = None,
         operation_timeout: float = 30,
+        turn_idle_reconcile_seconds: float = 2,
         lookup_page_limit: int = 50,
     ) -> None:
         self.codex = codex
@@ -148,12 +160,16 @@ class CodexService:
         self.stream_journal = stream_journal or StreamJournal()
         self.goal_adapter = goal_adapter or CodexGoalAdapter(codex)
         self.operation_timeout = operation_timeout
+        self.turn_idle_reconcile_seconds = max(0.01, turn_idle_reconcile_seconds)
         self.lookup_page_limit = lookup_page_limit
         self._pending_threads: dict[str, _PendingThread] = {}
         self._thread_projects: dict[str, Project] = {}
         self._publish_lock = asyncio.Lock()
         self._recent_stream_fingerprints: dict[str, tuple[str, float]] = {}
         self._ignored_notification_threads: set[str] = set()
+        self._turn_idle_reconciliation_tasks: dict[
+            tuple[str, str], asyncio.Task[None]
+        ] = {}
 
     async def _fan_out_record(self, record: dict[str, Any]) -> EventEnvelope | None:
         thread_id = str(record["thread_id"])
@@ -236,7 +252,7 @@ class CodexService:
         if turn_id is None:
             active = await self.turn_manager.current(thread_id)
             turn_id = active.turn_id if active is not None else None
-        return await self._publish(
+        published = await self._publish(
             thread_id,
             event_type="codex.notification",
             method=method,
@@ -244,6 +260,106 @@ class CodexService:
             turn_id=turn_id,
             channel=channel,
         )
+        if method == "thread/status/changed" and self._thread_status(data) == "idle":
+            self._schedule_idle_turn_reconciliation(thread_id, turn_id=turn_id)
+        return published
+
+    @staticmethod
+    def _thread_status(data: dict[str, Any]) -> str | None:
+        status: Any = data.get("status")
+        if isinstance(status, dict):
+            root = status.get("root")
+            if isinstance(root, dict):
+                status = root
+            if isinstance(status, dict):
+                status = status.get("type")
+        if isinstance(status, str) and status:
+            return status.lower()
+        return None
+
+    def _schedule_idle_turn_reconciliation(
+        self,
+        thread_id: str,
+        *,
+        turn_id: str | None,
+    ) -> None:
+        """Release a physical turn if Codex becomes idle without completing it."""
+        if turn_id is None:
+            return
+        key = (thread_id, turn_id)
+        existing = self._turn_idle_reconciliation_tasks.get(key)
+        if existing is not None and not existing.done():
+            return
+        task = asyncio.create_task(
+            self._reconcile_idle_turn(thread_id, turn_id),
+            name=f"codex-turn-idle-reconcile:{thread_id}:{turn_id}",
+        )
+        self._turn_idle_reconciliation_tasks[key] = task
+
+        def finished(completed: asyncio.Task[None]) -> None:
+            if self._turn_idle_reconciliation_tasks.get(key) is completed:
+                self._turn_idle_reconciliation_tasks.pop(key, None)
+            if completed.cancelled():
+                return
+            error = completed.exception()
+            if error is not None:
+                LOGW(
+                    "Codex idle turn reconciliation failed: "
+                    f"{type(error).__name__}"
+                )
+
+        task.add_done_callback(finished)
+
+    async def _reconcile_idle_turn(self, thread_id: str, turn_id: str) -> None:
+        await asyncio.sleep(self.turn_idle_reconcile_seconds)
+        await self._release_stale_turn(
+            thread_id,
+            turn_id,
+            error_code="missing_turn_completion",
+        )
+
+    async def _release_stale_turn(
+        self,
+        thread_id: str,
+        turn_id: str,
+        *,
+        error_code: str,
+    ) -> bool:
+        current = await self.turn_manager.current(thread_id)
+        if (
+            current is None
+            or current.kind != "turn"
+            or current.turn_id != turn_id
+        ):
+            return False
+
+        LOGW(
+            "Reconciling stale Codex turn: "
+            f"thread_id={thread_id} turn_id={turn_id} reason={error_code}"
+        )
+        try:
+            await self._publish(
+                thread_id,
+                event_type="console.turn.error",
+                method="turn/error",
+                data={"error_code": error_code},
+                turn_id=turn_id,
+            )
+        finally:
+            pump = current.task
+            if pump is not None and pump is not asyncio.current_task() and not pump.done():
+                pump.cancel()
+                await asyncio.gather(pump, return_exceptions=True)
+            latest = await self.turn_manager.current(thread_id)
+            if latest is not None and latest.turn_id == turn_id:
+                await self._publish(
+                    thread_id,
+                    event_type="console.turn.idle",
+                    method="console.turn.idle",
+                    turn_id=turn_id,
+                )
+                await self.turn_manager.finish(thread_id, turn_id=turn_id)
+        return True
 
     def _remember_pending_thread(
         self,
@@ -674,6 +790,40 @@ class CodexService:
             raise
         return {**thread, **turn}
 
+    async def create_thread_from_goal(
+        self,
+        *,
+        project_key: str,
+        objective: str,
+        model: str | None,
+        reasoning_effort: str | None,
+    ) -> dict[str, Any]:
+        project = self._project(project_key)
+        title = await self._generate_session_title(project, objective)
+        thread = await self.create_thread(
+            project_key=project_key,
+            name=title,
+            model=model,
+        )
+        try:
+            goal = await self.start_goal(
+                str(thread["id"]),
+                objective=objective,
+                token_budget=None,
+                model=model,
+                reasoning_effort=reasoning_effort,
+            )
+        except (asyncio.CancelledError, Exception):
+            try:
+                await self.delete_thread(str(thread["id"]))
+            except ConsoleServiceError as cleanup_error:
+                LOGW(
+                    "Failed to remove a session after its initial goal failed: "
+                    f"thread_id={thread['id']} exception={type(cleanup_error).__name__}"
+                )
+            raise
+        return {**thread, **goal}
+
     @staticmethod
     def _journal_envelope(record: dict[str, Any]) -> EventEnvelope:
         return EventEnvelope(
@@ -1054,6 +1204,16 @@ class CodexService:
                 thread_id,
                 include_turns=False,
             )
+            persisted_goal = self._goal_view(
+                await self._call(
+                    self.goal_adapter.get(thread_id),
+                    operation="thread_goal_get_before_turn",
+                )
+            )
+            if persisted_goal is not None and str(
+                persisted_goal.get("status", "")
+            ).lower() == "active":
+                raise ConsoleConflict
             handle = await self._call(
                 thread.turn(
                     prompt,
@@ -1524,10 +1684,30 @@ class CodexService:
             )
         except TurnNotActiveError as exc:
             raise ConsoleConflict from exc
-        await self._publish(
-            thread_id,
-            event_type=("console.goal.stopping" if active.kind == "goal" else "console.turn.stopping"),
-            method=("console.goal.stopping" if active.kind == "goal" else "console.turn.stopping"),
-            turn_id=active.turn_id,
-        )
-        return {"accepted": True, "thread_id": thread_id, "turn_id": active.turn_id}
+        except ConsoleUnavailable as exc:
+            if _is_stale_turn_interrupt_error(exc.__cause__) and await self._release_stale_turn(
+                thread_id,
+                str(active.turn_id),
+                error_code="stale_turn_interrupt",
+            ):
+                return {
+                    "accepted": True,
+                    "thread_id": thread_id,
+                    "turn_id": active.turn_id,
+                    "reconciled": True,
+                }
+            raise
+        current = await self.turn_manager.current(thread_id)
+        if current is not None and current.turn_id == active.turn_id:
+            await self._publish(
+                thread_id,
+                event_type=("console.goal.stopping" if active.kind == "goal" else "console.turn.stopping"),
+                method=("console.goal.stopping" if active.kind == "goal" else "console.turn.stopping"),
+                turn_id=active.turn_id,
+            )
+        return {
+            "accepted": True,
+            "thread_id": thread_id,
+            "turn_id": active.turn_id,
+            "reconciled": False,
+        }

@@ -603,6 +603,7 @@ def create_app(
             f"console_thread_create_start request_id={_request_id(request)} "
             f"project_key={command.project_key} has_name={command.name is not None} "
             f"has_initial_prompt={command.initial_prompt is not None} "
+            f"has_initial_goal={command.initial_goal is not None} "
             f"model_selected={command.model is not None}"
         )
         service = _service(request)
@@ -614,6 +615,13 @@ def create_app(
                 reasoning_effort=command.reasoning_effort,
             )
             if command.initial_prompt is not None
+            else await service.create_thread_from_goal(
+                project_key=command.project_key,
+                objective=command.initial_goal,
+                model=command.model,
+                reasoning_effort=command.reasoning_effort,
+            )
+            if command.initial_goal is not None
             else await service.create_thread(
                 project_key=command.project_key,
                 name=command.name,

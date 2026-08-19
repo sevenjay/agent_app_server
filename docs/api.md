@@ -38,7 +38,7 @@ File manager 拒絕 absolute path、path traversal、Windows-style separator、c
 | Method | Path | 用途 |
 | --- | --- | --- |
 | `GET` | `/api/codex/threads` | 依 `project_key`、`archived`、`cursor`、`limit` 列出 Threads |
-| `POST` | `/api/codex/threads` | 在 Project 建立 Thread |
+| `POST` | `/api/codex/threads` | 在 Project 建立 Thread；可用 `initial_prompt` 啟動普通 Turn，或用 `initial_goal` 啟動 logical Goal |
 | `GET` | `/api/codex/threads/{thread_id}` | 讀取 Journal materialized Thread／Timeline；partial 時合併 Codex history |
 | `GET` | `/api/codex/threads/{thread_id}/snapshot` | 讀取含 cursor、coverage、最新 diff／usage 的 materialized snapshot |
 | `PATCH` | `/api/codex/threads/{thread_id}` | 更新名稱、pin 或 custom label |
@@ -59,12 +59,13 @@ File manager 拒絕 absolute path、path traversal、Windows-style separator、c
 | `DELETE` | `/api/codex/threads/{thread_id}/goal` | 清除 Goal |
 
 Goal 狀態與 usage 由 Codex Thread store 保存，不鏡像到 SQLite。Goal 的多個 physical continuation Turns 在 Web runtime 中會合併成一個 logical operation。
+新 Session 的 composer 若以 `/goal <objective>` 開始，會使用 `initial_goal` 直接建立 logical Goal，不會先把 `/goal` 當成普通首個 Turn。
 
 ## Turns 與 events
 
 | Method | Path | 用途 |
 | --- | --- | --- |
-| `POST` | `/api/codex/threads/{thread_id}/turns` | 啟動新 Turn |
+| `POST` | `/api/codex/threads/{thread_id}/turns` | 啟動新 Turn；若 Thread 有未受本 process 管理的 active persisted Goal，回 `409` |
 | `POST` | `/api/codex/threads/{thread_id}/steer` | 對活動 Turn／Goal 追加指示 |
 | `POST` | `/api/codex/threads/{thread_id}/interrupt` | 中止活動 Turn |
 | `GET` | `/api/codex/threads/{thread_id}/events` | 訂閱該 Thread 的 SSE stream；可帶 `after_sequence` replay cursor |

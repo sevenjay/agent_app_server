@@ -2,6 +2,7 @@ import asyncio
 import tempfile
 from html.parser import HTMLParser
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import Request
@@ -579,6 +580,48 @@ async def test_goal_api_set_view_pause_resume_clear_and_validation() -> None:
             "goal": None
         }
         assert (await client.get("/api/codex/threads/thr_outside/goal")).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_new_session_initial_goal_uses_goal_operation() -> None:
+    application, fake = fake_application()
+    async with application_client(application) as client:
+        service = application.state.codex_runtime.service
+        service._generate_session_title = AsyncMock(return_value="Release goal")
+
+        created = await client.post(
+            "/api/codex/threads",
+            json={
+                "project_key": "agent_app_server",
+                "initial_goal": "Finish the release",
+                "model": "gpt-test",
+                "reasoning_effort": "xhigh",
+            },
+        )
+
+        assert created.status_code == 201
+        payload = created.json()
+        assert payload["accepted"] is True
+        assert payload["name"] == "Release goal"
+        assert payload["goal"]["status"] == "active"
+        assert fake.goal_requests == [
+            (payload["id"], "Finish the release", None)
+        ]
+        assert fake.turn_requests == []
+        active = (
+            await application.state.codex_runtime.turn_manager.status()
+        )["active_threads"][payload["id"]]
+        assert active["kind"] == "goal"
+
+        invalid = await client.post(
+            "/api/codex/threads",
+            json={
+                "project_key": "agent_app_server",
+                "initial_prompt": "ordinary",
+                "initial_goal": "goal",
+            },
+        )
+        assert invalid.status_code == 422
 
 
 @pytest.mark.asyncio

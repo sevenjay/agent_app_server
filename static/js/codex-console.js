@@ -1608,12 +1608,17 @@ window.codexConsole = function codexConsole() {
     async submitPrompt() {
       const text = this.prompt.trim();
       if (!text || this.busy) return;
+      const goalCommand = text === "/goal" || text.startsWith("/goal ");
+      if (goalCommand && this.draftSession && !this.threadId) {
+        await this.submitDraftGoal(text);
+        return;
+      }
       if (this.draftSession && !this.threadId) {
         await this.submitDraftPrompt(text);
         return;
       }
       if (!this.threadId) return;
-      if (text === "/goal" || text.startsWith("/goal ")) {
+      if (goalCommand) {
         await this.handleGoalCommand(text);
         return;
       }
@@ -1691,6 +1696,42 @@ window.codexConsole = function codexConsole() {
         await this.selectThread(thread.id);
       } catch (error) {
         this.prompt = text;
+        document.querySelector("#timeline").textContent =
+          "Send your first message to create this session.";
+        this.showError(error);
+      } finally {
+        this.busy = false;
+      }
+    },
+
+    async submitDraftGoal(command) {
+      const argument = command.slice("/goal".length).trim();
+      const action = argument.toLowerCase();
+      const objective = action.startsWith("set ")
+        ? argument.slice(4).trim()
+        : argument;
+      if (!objective || ["pause", "resume", "clear"].includes(action)) {
+        this.errorMessage = "Start a new session goal with /goal followed by an objective.";
+        return;
+      }
+
+      this.prompt = "";
+      this.busy = true;
+      document.querySelector("#timeline").textContent = "Naming session…";
+      try {
+        const thread = await this.api("/api/codex/threads", {
+          method: "POST",
+          body: JSON.stringify({
+            project_key: this.projectKey,
+            model: this.model || null,
+            reasoning_effort: this.reasoningEffort || null,
+            initial_goal: objective,
+          }),
+        });
+        this.markRunning(thread.id, Boolean(thread.accepted));
+        await this.selectThread(thread.id);
+      } catch (error) {
+        this.prompt = command;
         document.querySelector("#timeline").textContent =
           "Send your first message to create this session.";
         this.showError(error);
