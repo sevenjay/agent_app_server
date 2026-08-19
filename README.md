@@ -88,6 +88,36 @@ scripts/run.sh
 
 完整服務必須透過 `main.py` 或 `scripts/run.sh` 啟動；直接執行 `uvicorn main:app` 不會初始化 process-level database 與 scheduler。
 
+## systemd 部署
+
+部署專案並完成 production 設定後，註冊、啟動及查看服務狀態：
+
+```bash
+sudo scripts/register_systemd.sh
+sudo systemctl start agent-app-server.service
+sudo systemctl status agent-app-server.service
+```
+
+註冊腳本會寫入 `/etc/systemd/system/agent-app-server.service`、執行 `systemctl daemon-reload` 並 enable 服務，但不會自動啟動或重啟服務。
+
+如需指定執行服務的 Linux 使用者：
+
+```bash
+sudo AGENT_APP_SERVER_SERVICE_USER=jack scripts/register_systemd.sh
+```
+
+如需從不同的專案目錄註冊：
+
+```bash
+sudo AGENT_APP_SERVER_APP_DIR=/srv/agent-app-server scripts/register_systemd.sh
+```
+
+查看即時服務日誌：
+
+```bash
+sudo journalctl -u agent-app-server.service -f
+```
+
 ## 基本操作
 
 1. 選擇既有 Project，或在 Project selector 建立新目錄。
