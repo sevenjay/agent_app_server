@@ -1,5 +1,7 @@
 "use strict";
 
+const MODEL_SETTINGS_STORAGE_KEY = "codex-console.model-settings.v1";
+
 window.renderMarkdown = function renderMarkdown(source) {
   const markdown = String(source || "");
   if (!window.marked || !window.DOMPurify) {
@@ -247,6 +249,7 @@ window.codexConsole = function codexConsole() {
     },
 
     async init() {
+      this.restoreModelSettings();
       try {
         const [projects, preferences, status] = await Promise.all([
           this.api("/api/projects"),
@@ -297,7 +300,11 @@ window.codexConsole = function codexConsole() {
       try {
         const payload = await this.api("/api/codex/models");
         this.models = payload.data || [];
+        if (this.model && !this.modelDetails(this.model)) {
+          this.model = "";
+        }
         this.normalizeReasoningEffort();
+        this.persistModelSettings();
       } catch (error) {
         this.models = [];
         if (!String(error.message).includes("unavailable")) {
@@ -322,6 +329,37 @@ window.codexConsole = function codexConsole() {
         (option) => option.value === this.reasoningEffort,
       );
       if (!supported) this.reasoningEffort = "";
+    },
+
+    restoreModelSettings() {
+      try {
+        const stored = window.localStorage.getItem(MODEL_SETTINGS_STORAGE_KEY);
+        if (!stored) return;
+        const settings = JSON.parse(stored);
+        if (!settings || typeof settings !== "object" || Array.isArray(settings)) {
+          return;
+        }
+        this.model = typeof settings.model === "string" ? settings.model : "";
+        this.reasoningEffort = typeof settings.reasoningEffort === "string"
+          ? settings.reasoningEffort
+          : "";
+      } catch (_error) {
+        // Storage can be unavailable or contain malformed data; use defaults.
+      }
+    },
+
+    persistModelSettings() {
+      try {
+        window.localStorage.setItem(
+          MODEL_SETTINGS_STORAGE_KEY,
+          JSON.stringify({
+            model: this.model || "",
+            reasoningEffort: this.reasoningEffort || "",
+          }),
+        );
+      } catch (_error) {
+        // Keep the controls usable when storage is blocked or full.
+      }
     },
 
     reasoningEffortLabel(value) {

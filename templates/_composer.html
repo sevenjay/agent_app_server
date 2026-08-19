@@ -65,7 +65,7 @@
                 x-ref="modelSelect"
                 class="model-select"
                 x-model="model"
-                @change="$nextTick(() => normalizeReasoningEffort())"
+                @change="$nextTick(() => { normalizeReasoningEffort(); persistModelSettings(); })"
                 aria-label="Codex model"
               >
                 <option value="">Default model</option>
@@ -79,6 +79,7 @@
               <select
                 class="model-select"
                 x-model="reasoningEffort"
+                @change="$nextTick(() => persistModelSettings())"
                 :disabled="!reasoningEffortOptions.length"
                 aria-label="Reasoning effort"
               >

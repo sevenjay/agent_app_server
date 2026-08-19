@@ -567,6 +567,28 @@ def test_reasoning_effort_options_follow_the_selected_model_catalog() -> None:
     assert "reasoning_effort: this.reasoningEffort || null" in javascript
 
 
+def test_model_settings_persist_in_the_browser_and_restore_on_page_load() -> None:
+    composer = Path("templates/_composer.html").read_text(encoding="utf-8")
+    javascript = Path("static/js/codex-console.js").read_text(encoding="utf-8")
+
+    init = javascript.split("async init()", 1)[1].split("async api(", 1)[0]
+    load_models = javascript.split("async loadModels()", 1)[1].split(
+        "\n    modelDetails(",
+        1,
+    )[0]
+
+    assert 'const MODEL_SETTINGS_STORAGE_KEY = "codex-console.model-settings.v1";' in javascript
+    assert "this.restoreModelSettings();" in init
+    assert "window.localStorage.getItem(MODEL_SETTINGS_STORAGE_KEY)" in javascript
+    assert "window.localStorage.setItem(" in javascript
+    assert "reasoningEffort: this.reasoningEffort || \"\"" in javascript
+    assert "if (this.model && !this.modelDetails(this.model))" in load_models
+    assert "this.normalizeReasoningEffort();" in load_models
+    assert "this.persistModelSettings();" in load_models
+    assert composer.count("persistModelSettings()") == 2
+    assert "normalizeReasoningEffort(); persistModelSettings();" in composer
+
+
 def test_model_settings_use_a_compact_summary_and_comfortable_popover() -> None:
     html = Path("static/index.html").read_text(encoding="utf-8")
     composer = Path("templates/_composer.html").read_text(encoding="utf-8")
