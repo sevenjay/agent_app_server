@@ -522,6 +522,24 @@ def test_goal_uses_and_displays_the_selected_model() -> None:
     assert 'Object.hasOwn(event.data || {}, "model")' in javascript
 
 
+def test_draft_goal_creates_a_logical_goal_instead_of_a_normal_turn() -> None:
+    javascript = Path("static/js/codex-console.js").read_text(encoding="utf-8")
+    submit = javascript.split("async submitPrompt()", 1)[1].split(
+        "async submitDraftPrompt(",
+        1,
+    )[0]
+    draft_goal = javascript.split("async submitDraftGoal(", 1)[1].split(
+        "async handleGoalCommand(",
+        1,
+    )[0]
+
+    assert submit.index("goalCommand && this.draftSession") < submit.index(
+        "this.draftSession && !this.threadId"
+    )
+    assert 'initial_goal: objective' in draft_goal
+    assert 'initial_prompt: command' not in draft_goal
+
+
 def test_goal_uses_and_displays_the_selected_reasoning_effort() -> None:
     javascript = Path("static/js/codex-console.js").read_text(encoding="utf-8")
 

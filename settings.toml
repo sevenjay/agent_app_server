@@ -21,6 +21,9 @@ codex_event_history_limit = 2000
 codex_subscriber_queue_limit = 1000
 codex_shutdown_timeout_seconds = 10
 codex_operation_timeout_seconds = 30
+# Grace period for the normal turn/completed event after thread idle. If the
+# terminal event never arrives, release the stale Console turn as an error.
+codex_turn_idle_reconcile_seconds = 10
 codex_sse_heartbeat_seconds = 15
 codex_thread_lookup_page_limit = 50
 codex_journal_retention_days = 30

@@ -1,5 +1,6 @@
 import asyncio
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 from openai_codex import ApprovalMode, Sandbox
@@ -36,6 +37,40 @@ def make_service(fake: FakeCodex, project_path: Path) -> CodexService:
         sandbox=Sandbox.workspace_write,
         operation_timeout=1,
     )
+
+
+@pytest.mark.asyncio
+async def test_new_thread_from_goal_starts_one_logical_goal_operation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    fake = FakeCodex(tmp_path)
+    service = make_service(fake, tmp_path)
+    monkeypatch.setattr(
+        service,
+        "_generate_session_title",
+        AsyncMock(return_value="Ship the release"),
+    )
+
+    created = await service.create_thread_from_goal(
+        project_key="agent_app_server",
+        objective="Finish the release safely",
+        model="gpt-test",
+        reasoning_effort="xhigh",
+    )
+
+    assert created["accepted"] is True
+    assert created["name"] == "Ship the release"
+    assert created["goal"]["status"] == "active"
+    assert fake.goal_requests == [
+        (created["id"], "Finish the release safely", None)
+    ]
+    assert fake.turn_requests == []
+    active = (await service.turn_manager.status())["active_threads"][created["id"]]
+    assert active["kind"] == "goal"
+    assert active["turn_id"] == created["turn_id"]
+
+    await service.interrupt_turn(created["id"])
 
 
 @pytest.mark.asyncio
@@ -439,6 +474,34 @@ async def test_same_thread_conflicts_and_different_threads_run_concurrently(
 
 
 @pytest.mark.asyncio
+async def test_persisted_active_goal_blocks_unmanaged_normal_turn(
+    tmp_path: Path,
+) -> None:
+    fake = FakeCodex(tmp_path)
+    fake.goals["thr_one"] = {
+        "thread_id": "thr_one",
+        "objective": "Continue the release",
+        "status": "active",
+        "token_budget": None,
+        "tokens_used": 100,
+        "time_used_seconds": 5,
+        "created_at": 1,
+        "updated_at": 2,
+    }
+    service = make_service(fake, tmp_path)
+
+    with pytest.raises(ConsoleConflict):
+        await service.start_turn(
+            "thr_one",
+            prompt="Do not create a competing normal turn",
+            model=None,
+        )
+
+    assert fake.turn_requests == []
+    assert await service.turn_manager.is_active("thr_one") is False
+
+
+@pytest.mark.asyncio
 async def test_stream_exception_releases_active_state_and_emits_error(
     tmp_path: Path,
 ) -> None:
@@ -462,6 +525,158 @@ async def test_stream_exception_releases_active_state_and_emits_error(
     assert "console.turn.error" in methods
     assert "console.turn.idle" in methods
     await service.event_hub.close(subscription)
+
+
+@pytest.mark.asyncio
+async def test_global_idle_reconciles_turn_when_completion_never_arrives(
+    tmp_path: Path,
+) -> None:
+    fake = FakeCodex(tmp_path)
+    service = make_service(fake, tmp_path)
+    service.turn_idle_reconcile_seconds = 0.01
+    service.event_hub = EventHub(history_limit=100, subscriber_queue_limit=100)
+    subscription = await service.event_hub.subscribe("thr_one")
+
+    started = await service.start_turn(
+        "thr_one",
+        prompt="run a command that never reports completion",
+        model=None,
+    )
+    await service.publish_notification(
+        "thr_one",
+        method="thread/status/changed",
+        data={"thread_id": "thr_one", "status": {"type": "idle"}},
+        channel="global",
+    )
+
+    for _ in range(50):
+        if (
+            not await service.turn_manager.is_active("thr_one")
+            and not service._turn_idle_reconciliation_tasks
+        ):
+            break
+        await asyncio.sleep(0.005)
+
+    assert await service.turn_manager.is_active("thr_one") is False
+    assert fake.handles["thr_one"].release.is_set() is False
+    methods: list[str] = []
+    errors: list[str] = []
+    while not subscription.queue.empty():
+        event = await service.event_hub.next_event(subscription)
+        if event is not None:
+            methods.append(event.method)
+            if event.method == "turn/error":
+                errors.append(str(event.data.get("error_code")))
+    assert "thread/status/changed" in methods
+    assert "turn/error" in methods
+    assert "console.turn.idle" in methods
+    assert errors == ["missing_turn_completion"]
+    assert started["turn_id"] == "turn_1"
+    await service.event_hub.close(subscription)
+
+
+@pytest.mark.asyncio
+async def test_stale_interrupt_is_reconciled_as_idempotent_success(
+    tmp_path: Path,
+) -> None:
+    fake = FakeCodex(tmp_path)
+    service = make_service(fake, tmp_path)
+    service.event_hub = EventHub(history_limit=100, subscriber_queue_limit=100)
+    subscription = await service.event_hub.subscribe("thr_one")
+
+    await service.start_turn("thr_one", prompt="already obsolete", model=None)
+    handle = fake.handles["thr_one"]
+
+    async def reject_stale_interrupt():
+        raise InvalidRequestError(
+            -32600,
+            "expected active turn id turn_1 but found physical_turn_2",
+        )
+
+    handle.interrupt = reject_stale_interrupt  # type: ignore[method-assign]
+    result = await service.interrupt_turn("thr_one")
+
+    assert result["accepted"] is True
+    assert result["reconciled"] is True
+    assert await service.turn_manager.is_active("thr_one") is False
+    methods: list[str] = []
+    errors: list[str] = []
+    while not subscription.queue.empty():
+        event = await service.event_hub.next_event(subscription)
+        if event is not None:
+            methods.append(event.method)
+            if event.method == "turn/error":
+                errors.append(str(event.data.get("error_code")))
+    assert "turn/error" in methods
+    assert "console.turn.idle" in methods
+    assert "console.turn.stopping" not in methods
+    assert errors == ["stale_turn_interrupt"]
+    await service.event_hub.close(subscription)
+
+
+@pytest.mark.asyncio
+async def test_turn_completion_inside_idle_grace_is_not_reconciled(
+    tmp_path: Path,
+) -> None:
+    fake = FakeCodex(tmp_path)
+    service = make_service(fake, tmp_path)
+    service.turn_idle_reconcile_seconds = 0.02
+    service.event_hub = EventHub(history_limit=100, subscriber_queue_limit=100)
+    subscription = await service.event_hub.subscribe("thr_one")
+
+    await service.start_turn("thr_one", prompt="finish normally", model=None)
+    await service.publish_notification(
+        "thr_one",
+        method="thread/status/changed",
+        data={"thread_id": "thr_one", "status": {"type": "idle"}},
+        channel="global",
+    )
+    fake.handles["thr_one"].release.set()
+
+    for _ in range(50):
+        if (
+            not await service.turn_manager.is_active("thr_one")
+            and not service._turn_idle_reconciliation_tasks
+        ):
+            break
+        await asyncio.sleep(0.005)
+
+    methods: list[str] = []
+    while not subscription.queue.empty():
+        event = await service.event_hub.next_event(subscription)
+        if event is not None:
+            methods.append(event.method)
+    assert "turn/completed" in methods
+    assert "turn/error" not in methods
+    assert await service.turn_manager.is_active("thr_one") is False
+    await service.event_hub.close(subscription)
+
+
+@pytest.mark.asyncio
+async def test_global_idle_does_not_reconcile_logical_goal(tmp_path: Path) -> None:
+    fake = FakeCodex(tmp_path)
+    service = make_service(fake, tmp_path)
+    service.turn_idle_reconcile_seconds = 0.01
+
+    await service.start_goal(
+        "thr_one",
+        objective="continue across physical turns",
+        token_budget=None,
+        model=None,
+        reasoning_effort=None,
+    )
+    await service.publish_notification(
+        "thr_one",
+        method="thread/status/changed",
+        data={"thread_id": "thr_one", "status": {"type": "idle"}},
+        channel="global",
+    )
+    await asyncio.sleep(0.02)
+
+    active = await service.turn_manager.current("thr_one")
+    assert active is not None
+    assert active.kind == "goal"
+    await service.pause_goal("thr_one")
 
 
 @pytest.mark.asyncio

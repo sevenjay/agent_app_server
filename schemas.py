@@ -64,6 +64,7 @@ class ThreadCreate(StrictRequest):
     name: Annotated[str, Field(min_length=1, max_length=200)] | None = None
     model: ModelId | None = None
     initial_prompt: Prompt | None = None
+    initial_goal: GoalObjective | None = None
     reasoning_effort: ReasoningEffort | None = None
 
     @field_validator("name")
@@ -78,10 +79,21 @@ class ThreadCreate(StrictRequest):
 
     @model_validator(mode="after")
     def validate_creation_mode(self) -> ThreadCreate:
-        if self.name is not None and self.initial_prompt is not None:
-            raise ValueError("name and initial_prompt are mutually exclusive")
-        if self.reasoning_effort is not None and self.initial_prompt is None:
-            raise ValueError("reasoning_effort requires initial_prompt")
+        creation_modes = (
+            self.name is not None,
+            self.initial_prompt is not None,
+            self.initial_goal is not None,
+        )
+        if sum(creation_modes) > 1:
+            raise ValueError(
+                "name, initial_prompt, and initial_goal are mutually exclusive"
+            )
+        if (
+            self.reasoning_effort is not None
+            and self.initial_prompt is None
+            and self.initial_goal is None
+        ):
+            raise ValueError("reasoning_effort requires initial_prompt or initial_goal")
         return self
 
 
