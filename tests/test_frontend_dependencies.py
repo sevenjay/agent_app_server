@@ -740,3 +740,13 @@ def test_inspector_shows_three_plan_revisions() -> None:
     assert "recent.slice(-3)" in javascript
     assert "this.recordPlanUpdate(event);" in javascript
     assert "planStepMarker(status)" in javascript
+    assert 'text: this.formatPlanText(plan.text)' in javascript
+    assert 'completed: "✓"' in javascript
+    assert 'inprogress: "→"' in javascript
+    assert 'pending: "○"' in javascript
+    assert 'failed: "✗"' in javascript
+    assert 'warning: "!"' in javascript
+    assert 'blocked: "⊘"' in javascript
+    assert 'retry: "↻"' in javascript
+    assert 'rerun: "↻"' in javascript
+    assert 'skipped: "–"' in javascript

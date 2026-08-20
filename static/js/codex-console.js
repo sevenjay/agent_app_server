@@ -2276,7 +2276,7 @@ window.codexConsole = function codexConsole() {
       this.livePlans = this.recentPlans([
         ...plans.map((plan, index) => ({
           key: plan.key || `history-plan-${index}`,
-          text: String(plan.text || "").trim(),
+          text: this.formatPlanText(plan.text),
         })),
         ...this.livePlans,
       ]);
@@ -2346,13 +2346,32 @@ window.codexConsole = function codexConsole() {
       return [explanation, steps.join("\n")].filter(Boolean).join("\n");
     },
 
+    formatPlanText(text) {
+      const statusPattern =
+        /^(\s*)(completed|inProgress|in_progress|pending|failed|warning|blocked|retry|rerun|skipped)\s*:\s*/gim;
+      return String(text || "")
+        .trim()
+        .replace(statusPattern, (_match, indent, status) => {
+          return `${indent}${this.planStepMarker(status)} `;
+        });
+    },
+
     planStepMarker(status) {
+      const normalizedStatus = String(status || "")
+        .trim()
+        .toLowerCase()
+        .replace(/[\s_-]+/g, "");
       return {
         completed: "✓",
-        inProgress: "→",
-        in_progress: "→",
+        inprogress: "→",
         pending: "○",
-      }[status] || "•";
+        failed: "✗",
+        warning: "!",
+        blocked: "⊘",
+        retry: "↻",
+        rerun: "↻",
+        skipped: "–",
+      }[normalizedStatus] || "•";
     },
 
     eventText(event) {
