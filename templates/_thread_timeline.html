@@ -1,13 +1,13 @@
 <div
-  class="space-y-5"
+  class="timeline-root"
   data-thread-id="{{ thread.id }}"
   data-journal-cursor="{{ thread.get('journal_cursor', 0) }}"
   data-journal-coverage="{{ thread.get('journal_coverage', 'absent') }}"
 >
-  <header class="flex items-start justify-between gap-4 border-b border-surface-700 pb-4">
+  <header class="flex items-start justify-between gap-3 border-b border-surface-700 pb-3">
     <div class="min-w-0">
       <p class="section-kicker">Conversation</p>
-      <h2 class="truncate text-xl font-semibold text-white">
+      <h2 class="truncate text-base font-semibold text-white">
         {{ thread.custom_label or thread.name or thread.preview or "Untitled session" }}
       </h2>
     </div>
@@ -17,12 +17,21 @@
   </header>
 
   {% for turn in thread.get("turns", []) %}
-    <section class="space-y-3" aria-label="Turn {{ turn.id }}">
-      <div class="flex items-center gap-2 font-mono text-[11px] text-slate-500">
-        <span>{{ turn.id }}</span>
-        <span>·</span>
-        <span>{{ turn.status }}</span>
-      </div>
+    <section class="turn-section" aria-label="Turn {{ turn.id }}">
+      {% if turn.status != "completed" %}
+        <div class="turn-meta flex items-center gap-2 font-mono text-[11px] text-slate-500">
+          <button
+            type="button"
+            class="status-help"
+            aria-label="Turn ID"
+            aria-describedby="turn-id-{{ turn.id }}"
+          >
+            <span aria-hidden="true">i</span>
+            <span id="turn-id-{{ turn.id }}" class="status-tooltip turn-id-tooltip" role="tooltip">{{ turn.id }}</span>
+          </button>
+          <span>{{ turn.status }}</span>
+        </div>
+      {% endif %}
       {% for item in turn.get("items", []) %}
         {% set item_type = item.get("type", "unknown") %}
         {% if item_type == "userMessage" %}
@@ -120,28 +129,35 @@
           </details>
         {% endif %}
       {% endfor %}
+      {% if turn.status == "completed" %}
+        <div class="turn-meta turn-meta-end flex items-center justify-end gap-2 font-mono text-[11px] text-slate-500">
+          <button
+            type="button"
+            class="status-help"
+            aria-label="Turn ID"
+            aria-describedby="turn-id-{{ turn.id }}"
+          >
+            <span aria-hidden="true">i</span>
+            <span id="turn-id-{{ turn.id }}" class="status-tooltip turn-id-tooltip" role="tooltip">{{ turn.id }}</span>
+          </button>
+          <span>{{ turn.status }}</span>
+        </div>
+      {% endif %}
     </section>
   {% else %}
-    <div class="empty-state py-16" x-show="!liveTimelineItems.length">
+    <div class="empty-state py-10" x-show="!liveTimelineItems.length">
       This session has no turns yet. Connect to its stream and send the first prompt.
     </div>
   {% endfor %}
 
   <template x-for="item in liveTimelineItems" :key="item.key">
     <section
-      class="space-y-3"
+      class="live-timeline-item"
+      :class="`live-item-${item.kind}`"
       :aria-label="item.kind === 'tool' ? `${item.tool.type || 'tool'} result` : item.kind === 'agent' ? 'Streaming assistant response' : 'Your message'"
     >
       <template x-if="item.kind !== 'tool'">
-        <div class="space-y-3">
-          <div
-            x-show="item.kind === 'agent'"
-            class="flex items-center gap-2 font-mono text-[11px] text-slate-500"
-          >
-            <span>Live response</span>
-            <span x-show="item.streaming" aria-hidden="true">·</span>
-            <span x-show="item.streaming" class="streaming-indicator">streaming</span>
-          </div>
+        <div class="space-y-1.5">
           <article
             class="message-card"
             :class="item.kind === 'agent' ? 'message-agent' : 'message-user'"
@@ -153,6 +169,14 @@
               x-html="renderMarkdown(item.text)"
             ></div>
           </article>
+          <div
+            x-show="item.kind === 'agent'"
+            class="flex items-center justify-end gap-2 font-mono text-[11px] text-slate-500"
+          >
+            <span>Live response</span>
+            <span x-show="item.streaming" aria-hidden="true">·</span>
+            <span x-show="item.streaming" class="streaming-indicator">streaming</span>
+          </div>
         </div>
       </template>
 

@@ -65,6 +65,7 @@ window.codexConsole = function codexConsole() {
     errorMessage: "",
     mobileTab: "chat",
     conversationTab: "timeline",
+    sidebarOpen: localStorage.getItem("cc-sidebar-open") !== "0",
     collapsibleToolCardCount: 0,
     allToolCardsExpanded: false,
     eventCounter: 0,
