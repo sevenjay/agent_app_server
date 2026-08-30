@@ -280,8 +280,27 @@ def test_goal_completion_reconciles_live_responses_with_persisted_history() -> N
 
     assert "const completedTurnId = event.turn_id;" in goal_idle
     assert "this.finishStreamingAgentMessages(completedTurnId);" in goal_idle
-    assert "this.refreshThreadAndList()" in goal_idle
-    assert "this.clearCompletedLiveMessages(completedTurnId);" in goal_idle
+    assert "this.queueTerminalRefresh(event, completedTurnId);" in goal_idle
+
+
+def test_terminal_panel_refreshes_are_idempotent_and_coalesced() -> None:
+    javascript = Path("static/js/codex-console.js").read_text(encoding="utf-8")
+    terminal_refresh = javascript.split("queueTerminalRefresh(event, completedTurnId) {", 1)[1].split(
+        "isLiveDebugEvent(event)",
+        1,
+    )[0]
+    refresh = javascript.split("async refreshThreadAndList()", 1)[1].split(
+        "async newProject()",
+        1,
+    )[0]
+
+    assert "`${threadId}:${turnId}`" in terminal_refresh
+    assert "this.terminalRefreshKeys.includes(terminalKey)" in terminal_refresh
+    assert "this.terminalRefreshKeys.length > 100" in terminal_refresh
+    assert "key !== terminalKey" in terminal_refresh
+    assert "threadRefreshQueued = true" in refresh
+    assert "if (threadRefreshPromise) return threadRefreshPromise" in refresh
+    assert "while (threadRefreshQueued)" in refresh
 
 
 def test_user_messages_render_optimistically_before_live_responses() -> None:
@@ -731,13 +750,20 @@ def test_inspector_shows_three_plan_revisions() -> None:
     assert "Plan trajectory" in template
     assert (
         'x-init=\'syncPlanHistory({{ thread.id|tojson }}, '
-        '{{ plan_history|tojson }})\''
+        '{{ plan_history|tojson }}, {{ thread.get("journal_cursor", 0)|tojson }})\''
     ) in template
     assert 'x-for="(plan, index) in livePlans"' in template
-    assert "Revision ${index + 1}" in template
+    assert "Revision ${plan.revision || index + 1}" in template
+    assert 'x-text="plan.revision || index + 1"' in template
     assert ">Current</span>" in template
     assert "livePlan\"" not in template
     assert "recent.slice(-3)" in javascript
+    assert "livePlanSnapshotCursor" in javascript
+    assert "snapshotCursor < currentCursor" in javascript
+    assert "left.revision - right.revision" in javascript
+    assert 'key: `plan-revision-${revision}`' in javascript
+    assert 'source: "live"' in javascript
+    assert 'source: "snapshot"' in javascript
     assert "this.recordPlanUpdate(event);" in javascript
     assert "planStepMarker(status)" in javascript
     assert 'text: this.formatPlanText(plan.text)' in javascript

@@ -157,7 +157,7 @@
     </section>
 
     <section
-      x-init='syncPlanHistory({{ thread.id|tojson }}, {{ plan_history|tojson }})'
+      x-init='syncPlanHistory({{ thread.id|tojson }}, {{ plan_history|tojson }}, {{ thread.get("journal_cursor", 0)|tojson }})'
     >
     <div class="flex items-center justify-between gap-3">
       <p class="section-kicker">Plan trajectory</p>
@@ -173,10 +173,10 @@
           class="plan-track-item"
           :class="{ 'plan-track-item-current': index === livePlans.length - 1 }"
         >
-          <span class="plan-track-marker" x-text="index + 1"></span>
+          <span class="plan-track-marker" x-text="plan.revision || index + 1"></span>
           <div class="plan-track-content">
             <div class="flex items-center justify-between gap-2">
-              <span class="plan-track-label" x-text="`Revision ${index + 1}`"></span>
+              <span class="plan-track-label" x-text="`Revision ${plan.revision || index + 1}`"></span>
               <span
                 x-show="index === livePlans.length - 1"
                 class="plan-track-current"

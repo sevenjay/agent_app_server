@@ -66,9 +66,9 @@ def test_recent_plan_history_keeps_the_latest_three_in_order() -> None:
     }
 
     assert main._recent_plan_history(thread) == [
-        {"key": "plan-2", "text": "Second"},
-        {"key": "plan-3", "text": "Third"},
-        {"key": "plan-4", "text": "Fourth"},
+        {"key": "plan-revision-2", "text": "Second", "revision": 2},
+        {"key": "plan-revision-3", "text": "Third", "revision": 3},
+        {"key": "plan-revision-4", "text": "Fourth", "revision": 4},
     ]
 
 

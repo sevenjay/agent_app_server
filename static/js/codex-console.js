@@ -27,6 +27,9 @@ window.renderMarkdown = function renderMarkdown(source) {
 };
 
 window.codexConsole = function codexConsole() {
+  let threadRefreshPromise = null;
+  let threadRefreshQueued = false;
+
   return {
     projectKey: "",
     threadId: "",
@@ -51,6 +54,8 @@ window.codexConsole = function codexConsole() {
     liveEvents: [],
     liveTimelineItems: [],
     livePlans: [],
+    livePlanSnapshotCursor: null,
+    terminalRefreshKeys: [],
     liveDiff: "",
     liveDiffSequence: null,
     liveDiffSource: null,
@@ -880,6 +885,8 @@ window.codexConsole = function codexConsole() {
       this.pendingLiveEvents = [];
       this.resetLiveTimeline();
       this.livePlans = [];
+      this.livePlanSnapshotCursor = null;
+      this.terminalRefreshKeys = [];
       this.liveDiff = "";
       this.liveDiffSequence = null;
       this.liveDiffSource = null;
@@ -947,6 +954,7 @@ window.codexConsole = function codexConsole() {
         },
       );
       this.livePlans = this.livePlans.filter((plan) => {
+        if (plan.source !== "live") return true;
         const sequence = Number(plan.sequence);
         return !Number.isSafeInteger(sequence) || sequence > cursor;
       });
@@ -969,8 +977,23 @@ window.codexConsole = function codexConsole() {
     },
 
     async refreshThreadAndList() {
-      await this.refreshThread();
-      await this.refreshThreads();
+      threadRefreshQueued = true;
+      if (threadRefreshPromise) return threadRefreshPromise;
+
+      threadRefreshPromise = (async () => {
+        while (threadRefreshQueued) {
+          threadRefreshQueued = false;
+          const threadId = this.threadId;
+          await this.refreshThread();
+          if (this.threadId === threadId) await this.refreshThreads();
+        }
+      })();
+
+      try {
+        await threadRefreshPromise;
+      } finally {
+        threadRefreshPromise = null;
+      }
     },
 
     async newProject() {
@@ -1103,6 +1126,7 @@ window.codexConsole = function codexConsole() {
         this.liveEvents = [];
         this.resetLiveTimeline();
         this.livePlans = [];
+        this.livePlanSnapshotCursor = null;
         this.liveDiff = "";
         this.liveDiffSequence = null;
         this.liveDiffSource = null;
@@ -1208,13 +1232,7 @@ window.codexConsole = function codexConsole() {
         this.bindPendingUserMessagesToTurn(completedTurnId);
         this.finishStreamingAgentMessages(completedTurnId);
         this.collapseToolCards();
-        this.refreshThreadAndList()
-          .then(() => {
-            if (this.threadId === event.thread_id) {
-              this.clearCompletedLiveMessages(completedTurnId);
-            }
-          })
-          .catch((error) => this.showError(error));
+        this.queueTerminalRefresh(event, completedTurnId);
       }
       if (event.type === "console.turn.error") {
         this.active = false;
@@ -1267,13 +1285,7 @@ window.codexConsole = function codexConsole() {
         const completedTurnId = event.turn_id;
         this.finishStreamingAgentMessages(completedTurnId);
         this.collapseToolCards();
-        this.refreshThreadAndList()
-          .then(() => {
-            if (this.threadId === event.thread_id) {
-              this.clearCompletedLiveMessages(completedTurnId);
-            }
-          })
-          .catch((error) => this.showError(error));
+        this.queueTerminalRefresh(event, completedTurnId);
       }
       if (event.type === "console.goal.error") {
         this.active = false;
@@ -1286,6 +1298,34 @@ window.codexConsole = function codexConsole() {
         this.errorMessage = "The long-running goal ended with an error.";
       }
       if (this.isLiveDebugEvent(event)) this.queueLiveEvent(event);
+    },
+
+    queueTerminalRefresh(event, completedTurnId) {
+      const threadId = String(event.thread_id || "");
+      const turnId = String(completedTurnId || "");
+      const terminalKey = threadId && turnId ? `${threadId}:${turnId}` : "";
+      if (terminalKey && this.terminalRefreshKeys.includes(terminalKey)) return;
+      if (terminalKey) {
+        this.terminalRefreshKeys.push(terminalKey);
+        if (this.terminalRefreshKeys.length > 100) {
+          this.terminalRefreshKeys.splice(0, this.terminalRefreshKeys.length - 100);
+        }
+      }
+
+      this.refreshThreadAndList()
+        .then(() => {
+          if (this.threadId === threadId) {
+            this.clearCompletedLiveMessages(completedTurnId);
+          }
+        })
+        .catch((error) => {
+          if (terminalKey) {
+            this.terminalRefreshKeys = this.terminalRefreshKeys.filter(
+              (key) => key !== terminalKey,
+            );
+          }
+          this.showError(error);
+        });
     },
 
     isLiveDebugEvent(event) {
@@ -2161,6 +2201,8 @@ window.codexConsole = function codexConsole() {
       this.pendingLiveEvents = [];
       this.resetLiveTimeline();
       this.livePlans = [];
+      this.livePlanSnapshotCursor = null;
+      this.terminalRefreshKeys = [];
       this.liveDiff = "";
       this.liveDiffSequence = null;
       this.liveDiffSource = null;
@@ -2272,28 +2314,63 @@ window.codexConsole = function codexConsole() {
       return `${seconds}s`;
     },
 
-    syncPlanHistory(threadId, plans = []) {
+    syncPlanHistory(threadId, plans = [], cursor = null) {
       if (this.threadId !== threadId) return;
-      this.livePlans = this.recentPlans([
-        ...plans.map((plan, index) => ({
-          key: plan.key || `history-plan-${index}`,
+      const snapshotCursor = cursor === null ? null : Number(cursor);
+      const currentCursor = this.livePlanSnapshotCursor === null
+        ? null
+        : Number(this.livePlanSnapshotCursor);
+      const hasSnapshotCursor = Number.isSafeInteger(snapshotCursor) && snapshotCursor >= 0;
+      const hasCurrentCursor = Number.isSafeInteger(currentCursor) && currentCursor >= 0;
+      if (hasSnapshotCursor && hasCurrentCursor && snapshotCursor < currentCursor) return;
+
+      const snapshotPlans = plans.map((plan, index) => {
+        const revision = this.planRevisionNumber(plan.revision) || index + 1;
+        return {
+          key: plan.key || `plan-revision-${revision}`,
           text: this.formatPlanText(plan.text),
-        })),
-        ...this.livePlans,
+          revision,
+          source: "snapshot",
+        };
+      });
+      const newerLivePlans = this.livePlans.filter((plan) => {
+        if (plan.source !== "live") return !hasSnapshotCursor;
+        const sequence = Number(plan.sequence);
+        return !hasSnapshotCursor || !Number.isSafeInteger(sequence) || sequence > snapshotCursor;
+      });
+      this.livePlans = this.recentPlans([
+        ...snapshotPlans,
+        ...newerLivePlans,
       ]);
+      if (hasSnapshotCursor) this.livePlanSnapshotCursor = snapshotCursor;
     },
 
     recordPlanUpdate(event) {
       const text = this.formatPlanUpdate(event.data);
-      if (!text) return;
+      if (!text || this.livePlans.some((plan) => plan.text === text)) return;
+      const revision = this.nextPlanRevision();
       this.livePlans = this.recentPlans([
         ...this.livePlans,
         {
-          key: `live-plan-${event.sequence ?? this.eventCounter++}`,
+          key: `plan-revision-${revision}`,
           text,
           sequence: Number(event.sequence),
+          revision,
+          source: "live",
         },
       ]);
+    },
+
+    planRevisionNumber(value) {
+      const revision = Number(value);
+      return Number.isSafeInteger(revision) && revision > 0 ? revision : null;
+    },
+
+    nextPlanRevision() {
+      return this.livePlans.reduce(
+        (latest, plan) => Math.max(latest, this.planRevisionNumber(plan.revision) || 0),
+        0,
+      ) + 1;
     },
 
     recentPlans(plans) {
@@ -2304,7 +2381,17 @@ window.codexConsole = function codexConsole() {
         const text = String(plan?.text || "").trim();
         if (!text || seen.has(text)) continue;
         seen.add(text);
-        recent.unshift({ key: plan.key, text, sequence: plan.sequence });
+        const revision = this.planRevisionNumber(plan.revision);
+        recent.unshift({
+          key: plan.key || (revision ? `plan-revision-${revision}` : `plan-${index}`),
+          text,
+          sequence: plan.sequence,
+          revision,
+          source: plan.source,
+        });
+      }
+      if (recent.every((plan) => plan.revision !== null)) {
+        recent.sort((left, right) => left.revision - right.revision);
       }
       return recent.slice(-3);
     },

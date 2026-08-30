@@ -133,17 +133,20 @@ def _recent_plan_history(
     thread: dict[str, Any],
     *,
     limit: int = 3,
-) -> list[dict[str, str]]:
-    plans: list[dict[str, str]] = []
+) -> list[dict[str, Any]]:
+    plans: list[dict[str, Any]] = []
+    revision = 0
     for turn in thread.get("turns", []):
         for item in turn.get("items", []):
             text = item.get("text")
             if item.get("type") != "plan" or not isinstance(text, str) or not text.strip():
                 continue
+            revision += 1
             plans.append(
                 {
-                    "key": str(item.get("id") or f"history-plan-{len(plans)}"),
+                    "key": f"plan-revision-{revision}",
                     "text": text,
+                    "revision": revision,
                 }
             )
     return plans[-limit:]
