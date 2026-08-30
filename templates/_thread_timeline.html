@@ -92,7 +92,7 @@
             <summary class="tool-card-summary">
               <span class="tool-card-summary-content">
                 <span class="item-label">Command</span>
-                <span class="font-mono text-[11px] text-slate-500">
+                <span class="tool-card-summary-status font-mono text-[11px] text-slate-500">
                   {{ item.get("status", "") }}{% if item.get("exit_code") is not none %} · exit {{ item.get("exit_code") }}{% endif %}
                 </span>
               </span>
@@ -206,7 +206,7 @@
             <span class="tool-card-summary-content">
               <span class="item-label">Command</span>
               <span
-                class="font-mono text-[11px] text-slate-500"
+                class="tool-card-summary-status font-mono text-[11px] text-slate-500"
                 x-text="liveToolStatus(item.tool)"
               ></span>
             </span>

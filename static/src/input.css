@@ -519,24 +519,56 @@
   }
 
   .tool-card-summary {
+    align-items: center;
     cursor: pointer;
+    display: flex;
+    gap: 0.45rem;
+    list-style: none;
+    min-width: 0;
   }
 
-  .tool-card-summary::marker {
+  .tool-card-summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .tool-card-summary::before {
+    border-bottom: 0.25rem solid transparent;
+    border-left: 0.375rem solid currentColor;
+    border-top: 0.25rem solid transparent;
     color: var(--color-brand-400);
+    content: "";
+    flex: none;
+    transform-origin: 0.1875rem center;
+    transition: transform 120ms ease;
+  }
+
+  .tool-card[open] > .tool-card-summary::before {
+    transform: rotate(90deg);
   }
 
   .tool-card-summary-content {
     align-items: center;
-    display: inline-flex;
+    display: flex;
+    flex: 1;
     gap: 0.5rem;
     justify-content: space-between;
-    vertical-align: middle;
-    width: calc(100% - 1.25rem);
+    min-width: 0;
+  }
+
+  .tool-card-summary-status {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .tool-card > .tool-card-summary .item-label {
     margin-bottom: 0;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .tool-card[open] > .tool-card-summary {
