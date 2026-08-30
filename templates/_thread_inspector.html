@@ -156,9 +156,11 @@
     </form>
     </section>
 
-    <section
+    <span
+      hidden
       x-init='syncPlanHistory({{ thread.id|tojson }}, {{ plan_history|tojson }}, {{ thread.get("journal_cursor", 0)|tojson }})'
-    >
+    ></span>
+    <section id="plan-trajectory" hx-preserve>
     <div class="flex items-center justify-between gap-3">
       <p class="section-kicker">Plan trajectory</p>
       <span
@@ -191,12 +193,16 @@
     </section>
   </div>
 
+  <span
+    hidden
+    x-init='syncUsageSnapshot({{ thread.id|tojson }}, {{ thread.get("journal_usage")|tojson }}, {{ thread.get("journal_cursor", 0)|tojson }})'
+  ></span>
   <section
     id="usage-panel-content"
+    hx-preserve
     class="lg:mt-4"
     :class="{ 'hidden lg:block': mobileTab !== 'status' }"
     aria-labelledby="usage-heading"
-    x-init='syncUsageSnapshot({{ thread.id|tojson }}, {{ thread.get("journal_usage")|tojson }}, {{ thread.get("journal_cursor", 0)|tojson }})'
   >
     <div class="flex items-center justify-between gap-3">
       <p id="usage-heading" class="section-kicker">Usage</p>

@@ -240,6 +240,8 @@ def test_timeline_snapshot_cursor_converges_before_sse_connection() -> None:
     )[0]
     assert "this.liveEvents =" not in convergence
     assert "this.pendingLiveEvents =" not in convergence
+    assert "this.livePlans =" not in convergence
+    assert "this.liveUsage =" not in convergence
     assert "this.liveEvents.length > 1000" in javascript
     assert "this.liveEvents.length - 1000" in javascript
     assert 'type === "codex.notification" || type.startsWith("console.")' in javascript
@@ -430,7 +432,7 @@ def test_mobile_status_separates_usage_and_runtime_health_from_plan() -> None:
 
     assert 'id="plan-panel-content"' in inspector
     assert "mobileTab === 'status'" in inspector
-    assert 'id="usage-panel-content"' in inspector
+    assert 'id="usage-panel-content"\n    hx-preserve' in inspector
     assert "mobileTab !== 'status'" in inspector
     assert 'hx-get="/partials/codex/status"' in html
     runtime_panel = html.split('hx-get="/partials/codex/status"', 1)[1]
@@ -653,6 +655,7 @@ def test_inspector_shows_three_plan_revisions() -> None:
         'x-init=\'syncPlanHistory({{ thread.id|tojson }}, '
         '{{ plan_history|tojson }}, {{ thread.get("journal_cursor", 0)|tojson }})\''
     ) in template
+    assert '<section id="plan-trajectory" hx-preserve>' in template
     assert 'x-for="(plan, index) in livePlans"' in template
     assert "Revision ${plan.revision || index + 1}" in template
     assert 'x-text="plan.revision || index + 1"' in template

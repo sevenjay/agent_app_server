@@ -953,11 +953,8 @@ window.codexConsole = function codexConsole() {
           return !Number.isSafeInteger(sequence) || sequence > cursor;
         },
       );
-      this.livePlans = this.livePlans.filter((plan) => {
-        if (plan.source !== "live") return true;
-        const sequence = Number(plan.sequence);
-        return !Number.isSafeInteger(sequence) || sequence > cursor;
-      });
+      // Inspector-owned state hands off when its snapshot arrives. Clearing it
+      // from the earlier timeline snapshot would briefly hide live Plan/Usage.
       if (
         Number.isSafeInteger(Number(this.liveDiffSequence)) &&
         Number(this.liveDiffSequence) <= cursor
@@ -965,14 +962,6 @@ window.codexConsole = function codexConsole() {
         this.liveDiff = "";
         this.liveDiffSequence = null;
         this.liveDiffSource = null;
-      }
-      if (
-        Number.isSafeInteger(Number(this.liveUsageSequence)) &&
-        Number(this.liveUsageSequence) <= cursor
-      ) {
-        this.liveUsage = null;
-        this.liveUsageSequence = null;
-        this.liveUsageSource = null;
       }
     },
 
