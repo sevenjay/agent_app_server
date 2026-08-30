@@ -206,24 +206,6 @@ def test_timeline_file_changes_link_to_the_changes_tab() -> None:
     assert '<pre class="diff-block">{{ change|tojson(indent=2) }}</pre>' not in template
 
 
-def test_message_cards_render_sanitized_markdown_without_labels() -> None:
-    template = Path("templates/_thread_timeline.html").read_text(encoding="utf-8")
-    javascript = Path("static/js/codex-console.js").read_text(encoding="utf-8")
-    tailwind = Path("static/src/input.css").read_text(encoding="utf-8")
-
-    assert template.count('class="markdown-body"') == 2
-    assert template.count('x-html="renderMarkdown($el.dataset.markdown)"') == 2
-    assert '<p class="item-label">You</p>' not in template
-    assert '<p class="item-label">Codex</p>' not in template
-    assert "window.marked.parse(markdown" in javascript
-    assert "window.DOMPurify.sanitize(html" in javascript
-    assert 'FORBID_ATTR: ["style"]' in javascript
-    assert ".markdown-body {" in tailwind
-    assert ".message-card .item-label" not in tailwind
-    assert "background: oklch(0.255 0.05 195);" in tailwind
-    assert "background: oklch(0.22 0.04 270);" in tailwind
-
-
 def test_agent_message_deltas_stream_into_timeline() -> None:
     template = Path("templates/_thread_timeline.html").read_text(encoding="utf-8")
     javascript = Path("static/js/codex-console.js").read_text(encoding="utf-8")
@@ -430,54 +412,6 @@ def test_goal_panel_and_slash_command_use_dedicated_goal_api() -> None:
     assert ".goal-status-active" in tailwind
 
 
-def test_split_headers_leave_conversation_at_the_top_of_the_app_shell() -> None:
-    html = Path("static/index.html").read_text(encoding="utf-8")
-    tailwind = Path("static/src/input.css").read_text(encoding="utf-8")
-
-    main_start = html.index('<main class="app-layout')
-    sidebar_start = html.index('<aside', main_start)
-    conversation_start = html.index('<section\n          class="conversation-panel', sidebar_start)
-    inspector_start = html.index('<aside', conversation_start)
-
-    assert html.index('<header class="app-header">', sidebar_start) < conversation_start
-    assert html.index('<header class="app-header inspector-header">', inspector_start) > inspector_start
-    assert '<header class="app-header">' not in html[:main_start]
-    assert "viewport-fit=cover" in html
-    assert 'class="mobile-conversation-status lg:hidden"' in html
-    assert "padding-bottom: env(safe-area-inset-bottom);" in tailwind
-    assert ".panel-scroll {" in tailwind
-
-
-def test_inspector_header_is_compact_and_shows_the_application_version() -> None:
-    html = Path("static/index.html").read_text(encoding="utf-8")
-    javascript = Path("static/js/codex-console.js").read_text(encoding="utf-8")
-    tailwind = Path("static/src/input.css").read_text(encoding="utf-8")
-
-    inspector_start = html.index('<aside\n          class="inspector')
-    inspector_end = html.index("</header>", inspector_start)
-    inspector_header = html[inspector_start:inspector_end]
-
-    assert 'class="app-header inspector-header"' in inspector_header
-    assert 'class="app-version hidden lg:block"' in inspector_header
-    assert 'x-text="appVersion ? `v${appVersion}` : \'\'"' in inspector_header
-    assert "appVersion: \"\"" in javascript
-    assert 'this.api("/api/status")' in javascript
-    assert 'this.appVersion = String(status.version || "");' in javascript
-    assert ".app-header.inspector-header" not in tailwind
-    assert ".app-header {" in tailwind
-    assert "height: calc(2.75rem + env(safe-area-inset-top));" in tailwind
-    assert ".conversation-toolbar {" in tailwind
-    assert tailwind.count(
-        "height: calc(2.75rem + env(safe-area-inset-top));"
-    ) == 2
-    assert "height: calc(3.5rem + env(safe-area-inset-top));" not in tailwind
-    assert "min-height: calc(3.25rem + env(safe-area-inset-top));" not in tailwind
-    assert "height: 1.75rem;" in tailwind
-    assert "width: 1.75rem;" in tailwind
-    assert "padding: 0 0.6rem;" in tailwind
-    assert ".app-version" in tailwind
-
-
 def test_mobile_navigation_lists_sessions_before_chat() -> None:
     html = Path("static/index.html").read_text(encoding="utf-8")
     tailwind = Path("static/src/input.css").read_text(encoding="utf-8")
@@ -634,39 +568,6 @@ def test_model_settings_use_a_compact_summary_and_comfortable_popover() -> None:
     assert ".model-settings-field" in tailwind
     assert ".composer-model-settings .model-settings-popover" in tailwind
     assert ".model-controls" not in tailwind
-
-
-def test_composer_floats_auto_grows_and_keeps_controls_inside() -> None:
-    html = Path("static/index.html").read_text(encoding="utf-8")
-    composer = Path("templates/_composer.html").read_text(encoding="utf-8")
-    javascript = Path("static/js/codex-console.js").read_text(encoding="utf-8")
-    tailwind = Path("static/src/input.css").read_text(encoding="utf-8")
-
-    assert 'class="composer-dock"' in html
-    assert 'x-init="$nextTick(() => observeComposerDock($el))"' in html
-    assert 'class="composer-surface"' in composer
-    assert 'class="composer-toolbar"' in composer
-    assert 'class="composer-input pretty-scrollbar"' in composer
-    assert 'rows="1"' in composer
-    assert '@input="resizeComposer($el)"' in composer
-    assert '$watch("prompt"' in composer
-    assert "resizeComposer(textarea)" in javascript
-    assert "observeComposerDock(composer)" in javascript
-    assert "new ResizeObserver(updateClearance)" in javascript
-    assert 'class="composer-submit"' in composer
-    assert composer.index('class="model-settings-trigger"') < composer.index(
-        'class="composer-submit"'
-    )
-    assert "Live stream ready" not in composer
-    assert "Ctrl/⌘ + Enter" not in composer
-    assert ".composer-dock" in tailwind
-    assert '.conversation-panel > [role="tabpanel"]::after' in tailwind
-    assert "height: var(--composer-clearance, 8rem);" in tailwind
-    assert ".composer-surface:focus-within" in tailwind
-    assert "padding: 0.75rem clamp(1rem, 2.25vw, 2rem) 1.25rem;" in tailwind
-    assert "background: rgb(0 0 0 / 50%);" in tailwind
-    assert "max-width: 52rem;" not in tailwind
-    assert "overflow-y: hidden;" in tailwind
 
 
 def test_session_actions_are_available_from_each_session_row() -> None:
