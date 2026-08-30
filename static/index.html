@@ -308,7 +308,6 @@
                 <div class="min-w-0">
                   <p class="section-kicker">Project workspace</p>
                   <h2 class="files-title">Files</h2>
-                  <p class="files-description">Manage files and folders inside the selected project.</p>
                 </div>
                 <div class="files-toolbar" x-show="projectKey">
                   <input
@@ -326,7 +325,7 @@
                       :disabled="fileOperationBusy || fileTreeLoading"
                       @change="refreshProjectFiles()"
                     >
-                    <span>Show hidden files</span>
+                    <span>Show hidden</span>
                   </label>
                   <button
                     type="button"

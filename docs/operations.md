@@ -113,7 +113,7 @@ codex_hidden_projects = ["private-tools", "internal notes"]
 
 Browser 只能提交 server 產生的 `project_key`。建立 Project 時只接受單一目錄名稱；Thread read、mutation、Turn 與 Goal 操作都會重新確認 Thread 實際 CWD 位於 registry 內。
 
-Files API 只接受 project-relative path，拒絕 absolute path、`..`、backslash、control characters 與 symbolic link。Files 分頁預設隱藏 `.` 開頭的項目，可由 toolbar 的 **Show hidden files** 選項顯示。上傳採用同目錄暫存檔後原子放置；刪除資料夾會遞迴移除其內容。
+Files API 只接受 project-relative path，拒絕 absolute path、`..`、backslash、control characters 與 symbolic link。Files 分頁預設隱藏 `.` 開頭的項目，可由 toolbar 的 **Show hidden** 選項顯示。上傳採用同目錄暫存檔後原子放置；刪除資料夾會遞迴移除其內容。
 
 ### Codex authentication
 

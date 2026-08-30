@@ -65,7 +65,7 @@ flowchart TD
     upload -->|同名且 overwrite=false| conflict["409 file_exists<br/>Browser 再要求確認"]
 ```
 
-Directory listing 預設略過 Linux 慣例中以 `.` 開頭的隱藏項目；Files toolbar 勾選 **Show hidden files** 後會以 `show_hidden=true` 重新載入。Symbolic link 或 special file 一律不顯示，後續直接指定這些 path 也會被拒絕。上傳先寫入目標資料夾內的 temporary file，flush／fsync 後再放置到最終名稱。未確認 overwrite 時，同名檔案不會被改動。
+Directory listing 預設略過 Linux 慣例中以 `.` 開頭的隱藏項目；Files toolbar 勾選 **Show hidden** 後會以 `show_hidden=true` 重新載入。Symbolic link 或 special file 一律不顯示，後續直接指定這些 path 也會被拒絕。上傳先寫入目標資料夾內的 temporary file，flush／fsync 後再放置到最終名稱。未確認 overwrite 時，同名檔案不會被改動。
 
 ## 啟動與串流一個 Turn
 

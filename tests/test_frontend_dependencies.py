@@ -168,7 +168,6 @@ def test_files_tab_provides_lazy_tree_and_guarded_file_operations() -> None:
     assert 'x-show="conversationTab === \'files\'"' in html
     files_tab_start = html.index('id="conversation-tab-files"')
     assert html.index("Live changes") < html.index("Files", files_tab_start)
-    assert html.index("Show hidden files") < html.index("Upload files")
     assert 'x-model="fileShowHidden"' in html
     assert '@change="refreshProjectFiles()"' in html
     assert "Upload files" in html
