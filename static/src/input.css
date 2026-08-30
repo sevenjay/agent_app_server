@@ -1890,6 +1890,7 @@
     border-color: color-mix(in oklab, var(--color-brand-400) 25%, var(--color-surface-700));
   }
 
+  .session-status-badge,
   .usage-live-badge {
     background: color-mix(in oklab, var(--color-signal-400) 10%, transparent);
     border: 1px solid color-mix(in oklab, var(--color-signal-400) 30%, transparent);
@@ -1900,6 +1901,28 @@
     letter-spacing: 0.08em;
     padding: 0.2rem 0.45rem;
     text-transform: uppercase;
+  }
+
+  .session-status-badge {
+    flex: none;
+    max-width: 12rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .session-turn-count {
+    align-items: center;
+    border: 1px solid color-mix(in oklab, var(--color-brand-400) 40%, transparent);
+    border-radius: 9999px;
+    color: var(--color-brand-400);
+    display: inline-flex;
+    font-size: 0.625rem;
+    height: 1.15rem;
+    justify-content: center;
+    line-height: 1;
+    min-width: 1.15rem;
+    padding: 0 0.25rem;
   }
 
   .usage-summary {

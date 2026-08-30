@@ -792,7 +792,7 @@ async def test_rendered_fragment_alpine_attributes_are_valid_html() -> None:
     assert '$watch("prompt"' in composer_init
     assert "resizeComposer($refs.composerInput)" in composer_init
     assert ">{'type': 'idle'}<" not in inspector.text
-    assert ">idle</dd>" in inspector.text
+    assert ">idle</span>" in inspector.text
     assert any(
         attrs.get("x-init") == 'syncSessionStatus("thr_one", {"type": "idle"})'
         for attrs in attributes
@@ -832,7 +832,7 @@ async def test_inspector_bootstraps_sdk_waiting_status() -> None:
     parser = ElementAttributeParser()
     parser.feed(inspector.text)
     attributes = [attrs for _tag, attrs in parser.elements]
-    assert ">active</dd>" in inspector.text
+    assert ">active</span>" in inspector.text
     assert any(
         attrs.get("x-init")
         == (

@@ -13,36 +13,31 @@
       {% set session_status = session_status.get("type", "idle") %}
     {% endif %}
     <section x-init='syncSessionStatus({{ thread.id|tojson }}, {{ session_status_payload|tojson }})'>
-    <p class="section-kicker">Session</p>
-    <dl class="mt-2 space-y-1.5 text-sm">
-      <div class="flex justify-between gap-3">
-        <dt class="text-slate-500">Status</dt>
+    <div class="flex items-center justify-between gap-3">
+      <p class="section-kicker">Session</p>
+      <span
+        class="session-status-badge"
+        x-text="sessionStatusLabel"
+        :title="sessionStatusLabel"
+        aria-live="polite"
+      >{{ session_status }}</span>
+    </div>
+    <dl class="mt-2 text-sm">
+      <div>
+        <dt class="sr-only">Model, reasoning, and turns</dt>
         <dd
-          class="max-w-48 text-right"
-          x-text="sessionStatusLabel"
-          :title="sessionStatusLabel"
-          aria-live="polite"
-        >{{ session_status }}</dd>
-      </div>
-      <div class="flex justify-between gap-3">
-        <dt class="text-slate-500">Model</dt>
-        <dd
-          class="min-w-0 max-w-44 truncate text-right font-mono text-xs text-slate-300"
-          x-text="currentModelId || 'default'"
-          :title="currentModelId || 'default'"
-        >default</dd>
-      </div>
-      <div class="flex justify-between gap-3">
-        <dt class="text-slate-500">Reasoning</dt>
-        <dd
-          class="max-w-48 text-right"
-          x-text="currentReasoningEffortLabel"
-          :title="currentReasoningEffortLabel"
-        >model default</dd>
-      </div>
-      <div class="flex justify-between gap-3">
-        <dt class="text-slate-500">Turns</dt>
-        <dd>{{ thread.get("turns", [])|length }}</dd>
+          class="flex min-w-0 items-center gap-2 font-mono text-xs text-slate-300"
+          :title="`Model: ${currentModelId || 'default'} · Reasoning: ${currentReasoningEffortLabel} · Turns: {{ thread.get("turns", [])|length }}`"
+        >
+          <span class="min-w-0 truncate" x-text="currentModelId || 'default'">default</span>
+          <span class="flex-none text-slate-500" aria-hidden="true">·</span>
+          <span class="flex-none" x-text="currentReasoningEffortLabel">model default</span>
+          <span class="flex-none text-slate-500" aria-hidden="true">·</span>
+          <span
+            class="session-turn-count"
+            aria-label="{{ thread.get('turns', [])|length }} turns"
+          >{{ thread.get("turns", [])|length }}</span>
+        </dd>
       </div>
     </dl>
     </section>

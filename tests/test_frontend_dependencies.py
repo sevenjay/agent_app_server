@@ -470,11 +470,25 @@ def test_mobile_status_separates_usage_and_runtime_health_from_plan() -> None:
 def test_inspector_shows_compact_session_details() -> None:
     template = Path("templates/_thread_inspector.html").read_text(encoding="utf-8")
     javascript = Path("static/js/codex-console.js").read_text(encoding="utf-8")
+    tailwind = Path("static/src/input.css").read_text(encoding="utf-8")
 
     assert ">Session</p>" in template
     assert ">ID</dt>" not in template
     assert ">Pinned</dt>" not in template
-    assert ">Model</dt>" in template
+    session_details = template.split(">Session</p>", 1)[1].split("</section>", 1)[0]
+    assert 'class="session-status-badge"' in session_details
+    assert 'class="session-turn-count"' in session_details
+    assert ">Status</dt>" not in session_details
+    assert ">Turns</dt>" not in session_details
+    assert ">Model</dt>" not in session_details
+    assert ">Reasoning</dt>" not in session_details
+    assert ">Model, reasoning, and turns</dt>" in session_details
+    assert session_details.count('aria-hidden="true">·</span>') == 2
+    assert "Model: ${currentModelId || 'default'}" in session_details
+    assert "Reasoning: ${currentReasoningEffortLabel}" in session_details
+    assert "· Turns: {{ thread.get" in session_details
+    assert ".session-status-badge" in tailwind
+    assert ".session-turn-count" in tailwind
     assert 'x-text="currentModelId || \'default\'"' in template
     assert 'x-text="sessionStatusLabel"' in template
     assert "syncSessionStatus({{ thread.id|tojson }}" in template
@@ -484,7 +498,6 @@ def test_inspector_shows_compact_session_details() -> None:
     assert "get sessionStatusLabel()" in javascript
     assert "item.is_default || item.isDefault" in javascript
     assert 'this.activeModel = requestedModel || "";' in javascript
-    assert '>Reasoning</dt>' in template
     assert 'x-text="currentReasoningEffortLabel"' in template
 
 
