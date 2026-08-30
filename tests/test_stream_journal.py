@@ -76,6 +76,86 @@ async def test_writer_assigns_durable_sequences_permissions_and_deduplicates(
 
 
 @pytest.mark.asyncio
+async def test_turn_metadata_materializes_model_timing_and_duration(
+    tmp_path: Path,
+) -> None:
+    journal = StreamJournal()
+    thread_id = "thr_metadata"
+    turn_id = "turn_metadata"
+    started = event(
+        thread_id,
+        "console.turn.running",
+        "console.turn.running",
+        {"model": "gpt-test", "reasoning_effort": "xhigh"},
+        turn_id=turn_id,
+    )
+    started["at"] = "2026-08-30T03:21:56Z"
+    completed = event(
+        thread_id,
+        "codex.notification",
+        "turn/completed",
+        {
+            "turn": {
+                "id": turn_id,
+                "status": "completed",
+                "startedAt": 1_788_061_316,
+                "completedAt": 1_788_061_327,
+                "durationMs": 11_250,
+            }
+        },
+        turn_id=turn_id,
+    )
+    completed["at"] = "2026-08-30T03:22:07Z"
+
+    await journal.append(tmp_path, thread_id, started)
+    await journal.append(tmp_path, thread_id, completed)
+
+    turns, _aliases = materialize_timeline(
+        thread_id,
+        await journal.read(tmp_path, thread_id),
+    )
+
+    assert turns[0]["model"] == "gpt-test"
+    assert turns[0]["reasoning_effort"] == "xhigh"
+    assert turns[0]["started_at"] == 1_788_061_316
+    assert turns[0]["completed_at"] == 1_788_061_327
+    assert turns[0]["duration_ms"] == 11_250
+
+
+@pytest.mark.asyncio
+async def test_history_turn_timing_enriches_an_existing_journal(
+    tmp_path: Path,
+) -> None:
+    journal = StreamJournal()
+    thread_id = "thr_history_timing"
+    turn_id = "turn_history_timing"
+    await journal.append_history(
+        tmp_path,
+        thread_id,
+        {"turns": [{"id": turn_id, "status": "completed", "items": []}]},
+    )
+
+    turns, _aliases = materialize_timeline(
+        thread_id,
+        await journal.read(tmp_path, thread_id),
+        history_turns=[
+            {
+                "id": turn_id,
+                "status": "completed",
+                "items": [],
+                "started_at": 1_788_061_316,
+                "completed_at": 1_788_061_327,
+                "duration_ms": 11_250,
+            }
+        ],
+    )
+
+    assert turns[0]["started_at"] == 1_788_061_316
+    assert turns[0]["completed_at"] == 1_788_061_327
+    assert turns[0]["duration_ms"] == 11_250
+
+
+@pytest.mark.asyncio
 async def test_writer_refuses_symlinks_in_private_journal_path(tmp_path: Path) -> None:
     root = tmp_path / ".stream_journal"
     outside = tmp_path / "outside"

@@ -116,6 +116,26 @@ def test_timeline_live_debug_and_latest_changes_are_separate_tabs() -> None:
     assert 'this.conversationTab = "timeline";' in javascript
 
 
+def test_turn_details_show_model_start_time_and_duration() -> None:
+    template = Path("templates/_thread_timeline.html").read_text(encoding="utf-8")
+    javascript = Path("static/js/codex-console.js").read_text(encoding="utf-8")
+    tailwind = Path("static/src/input.css").read_text(encoding="utf-8")
+
+    assert 'aria-label="Turn details"' in template
+    assert "turnModelSummary(" in template
+    assert "formatTurnStartedAt(" in template
+    assert "formatTurnDuration(" in template
+    assert ">Model</span>" in template
+    assert ">Started</span>" in template
+    assert ">Duration</span>" in template
+    assert "turnModelSummary(modelId, reasoningEffort)" in javascript
+    assert 'dateStyle: "medium"' in javascript
+    assert 'timeStyle: "medium"' in javascript
+    assert "formatTurnElapsed(milliseconds)" in javascript
+    assert ".turn-tooltip-row" in tailwind
+    assert ".turn-tooltip-value" in tailwind
+
+
 def test_timeline_toolbar_toggles_all_collapsible_tool_cards() -> None:
     html = Path("static/index.html").read_text(encoding="utf-8")
     javascript = Path("static/js/codex-console.js").read_text(encoding="utf-8")
@@ -463,7 +483,7 @@ def test_inspector_shows_compact_session_details() -> None:
     assert "get currentModelLabel()" not in javascript
     assert "get sessionStatusLabel()" in javascript
     assert "item.is_default || item.isDefault" in javascript
-    assert "this.activeModel = this.model || \"\";" in javascript
+    assert 'this.activeModel = requestedModel || "";' in javascript
     assert '>Reasoning</dt>' in template
     assert 'x-text="currentReasoningEffortLabel"' in template
 
@@ -525,7 +545,7 @@ def test_reasoning_effort_options_follow_the_selected_model_catalog() -> None:
     assert 'max: "Max"' in javascript
     assert 'ultra: "Ultra"' in javascript
     assert "Max and Ultra consume usage limits faster." in javascript
-    assert "reasoning_effort: this.reasoningEffort || null" in javascript
+    assert "reasoning_effort: requestedReasoningEffort" in javascript
 
 
 def test_model_settings_persist_in_the_browser_and_restore_on_page_load() -> None:

@@ -861,7 +861,11 @@ class CodexService:
                             await self._fan_out_record(appended.record)
             journal = await self.stream_journal.read(project.path, thread_id)
 
-        turns, aliases = materialize_timeline(thread_id, journal)
+        turns, aliases = materialize_timeline(
+            thread_id,
+            journal,
+            history_turns=history_view.get("turns", []),
+        )
         if aliases:
             async with self._publish_lock:
                 attached = await self.stream_journal.attach_aliases(
@@ -873,7 +877,11 @@ class CodexService:
                     if not appended.duplicate:
                         await self._fan_out_record(appended.record)
             journal = await self.stream_journal.read(project.path, thread_id)
-            turns, _unused_aliases = materialize_timeline(thread_id, journal)
+            turns, _unused_aliases = materialize_timeline(
+                thread_id,
+                journal,
+                history_turns=history_view.get("turns", []),
+            )
         journal_diff = ""
         journal_usage: dict[str, Any] | None = None
         for event in journal.events:

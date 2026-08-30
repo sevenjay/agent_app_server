@@ -1,3 +1,39 @@
+{% macro turn_details(turn) -%}
+  <button
+    type="button"
+    class="status-help"
+    aria-label="Turn details"
+    aria-describedby="turn-id-{{ turn.id }}"
+  >
+    <span aria-hidden="true">i</span>
+    <span id="turn-id-{{ turn.id }}" class="status-tooltip turn-id-tooltip" role="tooltip">
+      <span class="turn-tooltip-label">Turn ID</span>
+      <span class="turn-tooltip-id">{{ turn.id }}</span>
+      <span class="turn-tooltip-row">
+        <span class="turn-tooltip-label">Model</span>
+        <span
+          class="turn-tooltip-value"
+          x-text='turnModelSummary({{ turn.get("model")|tojson }}, {{ turn.get("reasoning_effort")|tojson }})'
+        >{{ turn.get("model") or "Unavailable" }}{% if turn.get("reasoning_effort") %} · {{ turn.get("reasoning_effort") }}{% endif %}</span>
+      </span>
+      <span class="turn-tooltip-row">
+        <span class="turn-tooltip-label">Started</span>
+        <time
+          class="turn-tooltip-value"
+          x-text='formatTurnStartedAt({{ turn.get("started_at")|tojson }})'
+        >{{ turn.get("started_at") or "Unavailable" }}</time>
+      </span>
+      <span class="turn-tooltip-row">
+        <span class="turn-tooltip-label">Duration</span>
+        <span
+          class="turn-tooltip-value"
+          x-text='formatTurnDuration({{ turn.get("duration_ms")|tojson }}, {{ turn.get("started_at")|tojson }}, {{ turn.get("completed_at")|tojson }}, {{ turn.get("status")|tojson }})'
+        >{{ turn.get("duration_ms") if turn.get("duration_ms") is not none else "Unavailable" }}</span>
+      </span>
+    </span>
+  </button>
+{%- endmacro %}
+
 <div
   class="timeline-root"
   data-thread-id="{{ thread.id }}"
@@ -20,15 +56,7 @@
     <section class="turn-section" aria-label="Turn {{ turn.id }}">
       {% if turn.status != "completed" %}
         <div class="turn-meta flex items-center gap-2 font-mono text-[11px] text-slate-500">
-          <button
-            type="button"
-            class="status-help"
-            aria-label="Turn ID"
-            aria-describedby="turn-id-{{ turn.id }}"
-          >
-            <span aria-hidden="true">i</span>
-            <span id="turn-id-{{ turn.id }}" class="status-tooltip turn-id-tooltip" role="tooltip">{{ turn.id }}</span>
-          </button>
+          {{ turn_details(turn) }}
           <span>{{ turn.status }}</span>
         </div>
       {% endif %}
@@ -131,15 +159,7 @@
       {% endfor %}
       {% if turn.status == "completed" %}
         <div class="turn-meta turn-meta-end flex items-center justify-end gap-2 font-mono text-[11px] text-slate-500">
-          <button
-            type="button"
-            class="status-help"
-            aria-label="Turn ID"
-            aria-describedby="turn-id-{{ turn.id }}"
-          >
-            <span aria-hidden="true">i</span>
-            <span id="turn-id-{{ turn.id }}" class="status-tooltip turn-id-tooltip" role="tooltip">{{ turn.id }}</span>
-          </button>
+          {{ turn_details(turn) }}
           <span>{{ turn.status }}</span>
         </div>
       {% endif %}

@@ -393,6 +393,68 @@ window.codexConsole = function codexConsole() {
         : label;
     },
 
+    turnModelSummary(modelId, reasoningEffort) {
+      const model = modelId ? this.modelDetails(modelId) : null;
+      const modelLabel = model?.display_name || model?.displayName ||
+        model?.model || model?.id || String(modelId || "Model unavailable");
+      const effortLabel = reasoningEffort
+        ? this.reasoningEffortLabel(reasoningEffort)
+        : "Reasoning unavailable";
+      return `${modelLabel} · ${effortLabel}`;
+    },
+
+    turnTimestampDate(value) {
+      if (value === null || value === undefined || value === "") return null;
+      const numeric = Number(value);
+      const date = Number.isFinite(numeric)
+        ? new Date(Math.abs(numeric) < 1e12 ? numeric * 1000 : numeric)
+        : new Date(String(value));
+      return Number.isNaN(date.getTime()) ? null : date;
+    },
+
+    formatTurnStartedAt(value) {
+      const date = this.turnTimestampDate(value);
+      if (!date) return "Unavailable";
+      return new Intl.DateTimeFormat(undefined, {
+        dateStyle: "medium",
+        timeStyle: "medium",
+      }).format(date);
+    },
+
+    formatTurnElapsed(milliseconds) {
+      let seconds = Math.max(0, Math.round(milliseconds / 1000));
+      const days = Math.floor(seconds / 86400);
+      seconds %= 86400;
+      const hours = Math.floor(seconds / 3600);
+      seconds %= 3600;
+      const minutes = Math.floor(seconds / 60);
+      seconds %= 60;
+      const parts = [];
+      if (days) parts.push(`${days}d`);
+      if (hours) parts.push(`${hours}h`);
+      if (minutes) parts.push(`${minutes}m`);
+      if (seconds || !parts.length) parts.push(`${seconds}s`);
+      return parts.join(" ");
+    },
+
+    formatTurnDuration(durationMs, startedAt, completedAt, status = "") {
+      const explicitDuration = durationMs === null || durationMs === undefined || durationMs === ""
+        ? null
+        : Number(durationMs);
+      if (Number.isFinite(explicitDuration) && explicitDuration >= 0) {
+        return this.formatTurnElapsed(explicitDuration);
+      }
+      const started = this.turnTimestampDate(startedAt);
+      const completed = this.turnTimestampDate(completedAt);
+      if (started && completed) {
+        return this.formatTurnElapsed(completed.getTime() - started.getTime());
+      }
+      if (started && ["running", "in_progress", "active"].includes(String(status))) {
+        return `${this.formatTurnElapsed(Date.now() - started.getTime())} so far`;
+      }
+      return "Unavailable";
+    },
+
     async savePreferences(values) {
       await this.api("/api/preferences", {
         method: "PATCH",
@@ -1703,11 +1765,14 @@ window.codexConsole = function codexConsole() {
         return;
       }
       const threadId = this.threadId;
+      const requestedModel = this.model || this.currentModelId || null;
+      const requestedReasoningEffort =
+        this.reasoningEffort || this.defaultReasoningEffort || null;
       this.prompt = "";
       this.busy = true;
       this.active = true;
-      this.activeModel = this.model || "";
-      this.activeReasoningEffort = this.reasoningEffort || "";
+      this.activeModel = requestedModel || "";
+      this.activeReasoningEffort = requestedReasoningEffort || "";
       this.syncSessionStatus(threadId, "starting");
       this.markRunning(threadId, true);
       const messageKey = this.appendOptimisticUserMessage(text);
@@ -1724,8 +1789,8 @@ window.codexConsole = function codexConsole() {
             method: "POST",
             body: JSON.stringify({
               prompt: text,
-              model: this.model || null,
-              reasoning_effort: this.reasoningEffort || null,
+              model: requestedModel,
+              reasoning_effort: requestedReasoningEffort,
             }),
           },
         );
@@ -1751,6 +1816,9 @@ window.codexConsole = function codexConsole() {
     },
 
     async submitDraftPrompt(text) {
+      const requestedModel = this.model || this.currentModelId || null;
+      const requestedReasoningEffort =
+        this.reasoningEffort || this.defaultReasoningEffort || null;
       this.prompt = "";
       this.busy = true;
       document.querySelector("#timeline").textContent = "Naming session…";
@@ -1759,8 +1827,8 @@ window.codexConsole = function codexConsole() {
           method: "POST",
           body: JSON.stringify({
             project_key: this.projectKey,
-            model: this.model || null,
-            reasoning_effort: this.reasoningEffort || null,
+            model: requestedModel,
+            reasoning_effort: requestedReasoningEffort,
             initial_prompt: text,
           }),
         });
@@ -1787,6 +1855,9 @@ window.codexConsole = function codexConsole() {
         return;
       }
 
+      const requestedModel = this.model || this.currentModelId || null;
+      const requestedReasoningEffort =
+        this.reasoningEffort || this.defaultReasoningEffort || null;
       this.prompt = "";
       this.busy = true;
       document.querySelector("#timeline").textContent = "Naming session…";
@@ -1795,8 +1866,8 @@ window.codexConsole = function codexConsole() {
           method: "POST",
           body: JSON.stringify({
             project_key: this.projectKey,
-            model: this.model || null,
-            reasoning_effort: this.reasoningEffort || null,
+            model: requestedModel,
+            reasoning_effort: requestedReasoningEffort,
             initial_goal: objective,
           }),
         });

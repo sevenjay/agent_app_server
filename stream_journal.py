@@ -126,6 +126,24 @@ def _safe_fields(data: dict[str, Any], fields: tuple[str, ...]) -> dict[str, Any
     return {field: _safe_value(data[field]) for field in fields if field in data}
 
 
+def _turn_metadata(data: dict[str, Any]) -> dict[str, Any]:
+    """Keep the small set of Turn fields used by the timeline details UI."""
+    metadata: dict[str, Any] = {}
+    aliases = {
+        "model": ("model",),
+        "reasoning_effort": ("reasoning_effort", "reasoningEffort"),
+        "started_at": ("started_at", "startedAt"),
+        "completed_at": ("completed_at", "completedAt"),
+        "duration_ms": ("duration_ms", "durationMs"),
+    }
+    for target, candidates in aliases.items():
+        for candidate in candidates:
+            if candidate in data:
+                metadata[target] = _safe_value(data[candidate])
+                break
+    return metadata
+
+
 def _safe_goal(value: Any) -> dict[str, Any] | None:
     if isinstance(value, dict) and isinstance(value.get("root"), dict):
         value = value["root"]
@@ -312,7 +330,7 @@ def normalize_event(
 
     if method == "turn/started":
         normalized_type = "turn.started"
-        safe_data = {"status": "running"}
+        safe_data = {"status": "running", **_turn_metadata(turn_data)}
     elif method == "turn/completed":
         status = str(raw.get("status") or turn_data.get("status") or "completed").lower()
         if status in {"interrupted", "cancelled", "canceled"}:
@@ -321,7 +339,7 @@ def normalize_event(
             normalized_type = "turn.error"
         else:
             normalized_type = "turn.completed"
-        safe_data = {"status": status}
+        safe_data = {"status": status, **_turn_metadata(turn_data)}
     elif method == "turn/error":
         normalized_type = "turn.error"
         safe_data = {"status": "error", "error_code": str(raw.get("error_code") or "stream_error")}
@@ -912,7 +930,11 @@ class StreamJournal:
                         "thread_id": thread_id,
                         "turn_id": turn_id,
                         "dedup_key": f"history:{thread_id}:{turn_id}:turn.started",
-                        "data": {"status": "running", "ordinal": turn_index},
+                        "data": {
+                            "status": "running",
+                            "ordinal": turn_index,
+                            **_turn_metadata(turn),
+                        },
                     },
                 )
             )
@@ -955,7 +977,7 @@ class StreamJournal:
                             "thread_id": thread_id,
                             "turn_id": turn_id,
                             "dedup_key": f"history:{thread_id}:{turn_id}:{terminal_type}",
-                            "data": {"status": status},
+                            "data": {"status": status, **_turn_metadata(turn)},
                         },
                     )
                 )
@@ -1078,6 +1100,8 @@ def _ui_type(event_type: str, event: dict[str, Any]) -> str | None:
 def materialize_timeline(
     thread_id: str,
     journal: JournalRead,
+    *,
+    history_turns: list[dict[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
     """Build the UI timeline and high-confidence cross-source alias suggestions."""
     turn_order: list[str] = []
@@ -1112,6 +1136,11 @@ def materialize_timeline(
 
     turn_order.sort(key=turn_sort_key)
 
+    history_metadata = {
+        str(turn.get("id")): _turn_metadata(turn)
+        for turn in history_turns or ()
+        if isinstance(turn, dict) and turn.get("id")
+    }
     turns: list[dict[str, Any]] = []
     alias_suggestions: list[dict[str, str]] = []
     for turn_id in turn_order:
@@ -1119,10 +1148,23 @@ def materialize_timeline(
         states: list[dict[str, Any]] = []
         by_source_id: dict[tuple[str, str], dict[str, Any]] = {}
         status = "running"
+        turn_metadata = history_metadata.get(turn_id, {}).copy()
         for event in events:
             event_type = str(event.get("type") or "")
+            data = event.get("data") if isinstance(event.get("data"), dict) else {}
+            if event_type == "turn.started":
+                for field in ("model", "reasoning_effort", "started_at"):
+                    if field in data:
+                        turn_metadata[field] = data[field]
+                if "started_at" not in turn_metadata and event.get("source") == "codex_stream":
+                    turn_metadata["started_at"] = event.get("at")
             if event_type in TERMINAL_TYPES:
-                status = str((event.get("data") or {}).get("status") or event_type.removeprefix("turn."))
+                status = str(data.get("status") or event_type.removeprefix("turn."))
+                for field in ("model", "reasoning_effort", "started_at", "completed_at", "duration_ms"):
+                    if field in data:
+                        turn_metadata[field] = data[field]
+                if "completed_at" not in turn_metadata and event.get("source") == "codex_stream":
+                    turn_metadata["completed_at"] = event.get("at")
                 continue
             ui_type = _ui_type(event_type, event)
             if ui_type is None:
@@ -1131,7 +1173,6 @@ def materialize_timeline(
             source_id = str(event.get("item_id") or "")
             event_id = str(event.get("event_id") or "")
             state = by_source_id.get((source, source_id)) if source_id else None
-            data = event.get("data") if isinstance(event.get("data"), dict) else {}
             text = str(data.get("text") or data.get("delta") or "")
 
             if state is None and source in {"codex_history", "codex_stream"}:
@@ -1225,5 +1266,16 @@ def materialize_timeline(
             items.append(item)
             if state["unresolved"]:
                 item["unresolved"] = True
-        turns.append({"id": turn_id, "status": status, "items": items})
+        turns.append(
+            {
+                "id": turn_id,
+                "status": status,
+                "items": items,
+                "model": turn_metadata.get("model"),
+                "reasoning_effort": turn_metadata.get("reasoning_effort"),
+                "started_at": turn_metadata.get("started_at"),
+                "completed_at": turn_metadata.get("completed_at"),
+                "duration_ms": turn_metadata.get("duration_ms"),
+            }
+        )
     return turns, alias_suggestions

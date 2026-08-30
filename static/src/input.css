@@ -573,11 +573,44 @@
   }
 
   .turn-id-tooltip {
+    display: grid;
+    gap: 0.5rem;
+    user-select: text;
+    width: min(22rem, calc(100vw - 2rem));
+    max-width: none;
+  }
+
+  .turn-meta:not(.turn-meta-end) .turn-id-tooltip {
+    right: auto;
+    left: 0;
+  }
+
+  .turn-tooltip-label {
+    color: oklch(0.58 0.02 250);
+    font-family: var(--font-sans);
+    font-size: 0.6rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .turn-tooltip-id {
+    border-bottom: 1px solid var(--color-surface-700);
+    color: oklch(0.86 0.025 250);
     font-family: var(--font-mono);
     overflow-wrap: anywhere;
-    user-select: text;
-    width: max-content;
-    max-width: 16rem;
+    padding-bottom: 0.5rem;
+  }
+
+  .turn-tooltip-row {
+    display: grid;
+    gap: 0.1rem;
+  }
+
+  .turn-tooltip-value {
+    color: oklch(0.84 0.025 250);
+    font-family: var(--font-mono);
+    overflow-wrap: anywhere;
   }
 
   .turn-section > .message-user + * {

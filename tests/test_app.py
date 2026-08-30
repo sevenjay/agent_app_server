@@ -700,6 +700,34 @@ async def test_partials_escape_model_content_and_metadata_preferences() -> None:
 
 
 @pytest.mark.asyncio
+async def test_timeline_turn_details_include_execution_metadata() -> None:
+    application, fake = fake_application()
+    turn = fake.threads["thr_one"]["turns"][0]
+    turn.update(
+        {
+            "model": "gpt-test",
+            "reasoning_effort": "xhigh",
+            "started_at": 1_788_061_316,
+            "completed_at": 1_788_061_327,
+            "duration_ms": 11_250,
+        }
+    )
+
+    async with application_client(application) as client:
+        timeline = await client.get("/partials/threads/thr_one/timeline")
+
+    assert timeline.status_code == 200
+    assert 'aria-label="Turn details"' in timeline.text
+    assert ">Turn ID</span>" in timeline.text
+    assert ">Model</span>" in timeline.text
+    assert "gpt-test · xhigh" in timeline.text
+    assert ">Started</span>" in timeline.text
+    assert ">1788061316</time>" in timeline.text
+    assert ">Duration</span>" in timeline.text
+    assert ">11250</span>" in timeline.text
+
+
+@pytest.mark.asyncio
 async def test_thread_snapshot_exposes_durable_journal_cursor_and_coverage() -> None:
     application, _fake = fake_application()
     async with application_client(application) as client:
