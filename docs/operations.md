@@ -159,7 +159,7 @@ DATABASE_URL=sqlite+aiosqlite:////absolute/path/app.db poetry run python main.py
 
 - Jinja2 負責 HTML partials。
 - HTMX 2.0.4 負責 partial request／swap。
-- Alpine.js 3.14.9 管理 browser state 與操作協調。
+- Alpine.js 3.16.3 管理 browser state 與操作協調。
 - HTMX timeline snapshot 提供 durable Journal cursor；Alpine.js 清除已由 snapshot 涵蓋的 transient items，再由原生 `EventSource` 從 JSONL cursor replay 並接上 EventHub live fan-out。
 - Marked 15.0.12 解析 Markdown，再由 DOMPurify 3.2.6 sanitize。
 - Tailwind CSS 4 是唯一需要建置的 frontend asset。

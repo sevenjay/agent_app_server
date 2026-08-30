@@ -5,7 +5,7 @@ EXPECTED_CDN_DEFER = {
     "https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js": False,
     "https://unpkg.com/marked@15.0.12/marked.min.js": False,
     "https://unpkg.com/dompurify@3.2.6/dist/purify.min.js": False,
-    "https://unpkg.com/alpinejs@3.14.9/dist/cdn.min.js": True,
+    "https://unpkg.com/alpinejs@3.16.3/dist/cdn.min.js": True,
 }
 
 

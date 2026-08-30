@@ -139,7 +139,7 @@ sudo journalctl -u agent-app-server.service -f
 ## 技術概覽
 
 - Backend：Python 3.12、FastAPI、OpenAI Codex SDK、SQLAlchemy async、SQLite WAL、Alembic、APScheduler
-- Frontend：Jinja2、HTMX 2.0.4、Alpine.js 3.14.9、Tailwind CSS 4、Marked、DOMPurify
+- Frontend：Jinja2、HTMX 2.0.4、Alpine.js 3.16.3、Tailwind CSS 4、Marked、DOMPurify
 - Live updates：Stream Journal durable cursor + 原生 `EventSource` SSE fan-out／replay
 - Runtime：單一 Uvicorn worker、單一 `AsyncCodex` client
 

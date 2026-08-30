@@ -127,7 +127,7 @@ async def test_status_api_and_static_shell_with_codex_disabled() -> None:
         assert shell.status_code == 200
         assert "Codex Console" in shell.text
         assert "htmx.org@2.0.4" in shell.text
-        assert "alpinejs@3.14.9" in shell.text
+        assert "alpinejs@3.16.3" in shell.text
 
         runtime_status = await client.get("/partials/codex/status")
         assert runtime_status.status_code == 200
