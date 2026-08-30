@@ -41,7 +41,7 @@ Files 分頁只使用目前選定的 `project_key`。Browser 不提交 server ab
 
 ```mermaid
 flowchart TD
-    open["開啟 Files 分頁"] --> list["GET /api/projects/{key}/files<br/>path = 空字串"]
+    open["開啟 Files 分頁"] --> list["GET /api/projects/{key}/files<br/>path = 空字串<br/>show_hidden = false"]
     list --> validate["ProjectFileManager<br/>逐層 lstat + path validation"]
     validate --> tree["回傳 directories-first 的一層 entries"]
     tree --> action{"使用者操作"}
@@ -65,7 +65,7 @@ flowchart TD
     upload -->|同名且 overwrite=false| conflict["409 file_exists<br/>Browser 再要求確認"]
 ```
 
-Directory listing 不顯示 symbolic link 或 special file；後續直接指定這些 path 也會被拒絕。上傳先寫入目標資料夾內的 temporary file，flush／fsync 後再放置到最終名稱。未確認 overwrite 時，同名檔案不會被改動。
+Directory listing 預設略過 Linux 慣例中以 `.` 開頭的隱藏項目；Files toolbar 勾選 **Show hidden files** 後會以 `show_hidden=true` 重新載入。Symbolic link 或 special file 一律不顯示，後續直接指定這些 path 也會被拒絕。上傳先寫入目標資料夾內的 temporary file，flush／fsync 後再放置到最終名稱。未確認 overwrite 時，同名檔案不會被改動。
 
 ## 啟動與串流一個 Turn
 

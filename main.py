@@ -451,9 +451,14 @@ def create_app(
         request: Request,
         project_key: ProjectKey,
         path: Annotated[str, Query(max_length=4096)] = "",
+        show_hidden: bool = False,
     ) -> dict[str, Any]:
         manager = project_file_manager(request, project_key)
-        return await asyncio.to_thread(manager.list_directory, path)
+        return await asyncio.to_thread(
+            manager.list_directory,
+            path,
+            show_hidden=show_hidden,
+        )
 
     @application.get(
         "/api/projects/{project_key}/files/download",

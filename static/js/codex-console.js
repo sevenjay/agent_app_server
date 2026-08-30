@@ -91,6 +91,7 @@ window.codexConsole = function codexConsole() {
     fileOperationBusy: false,
     fileOperationLabel: "",
     fileError: "",
+    fileShowHidden: false,
 
     get connectionLabel() {
       return {
@@ -489,7 +490,10 @@ window.codexConsole = function codexConsole() {
       if (!projectKey || this.fileLoadingPaths.includes(path)) return false;
       this.fileLoadingPaths = [...this.fileLoadingPaths, path];
       try {
-        const payload = await this.api(this.projectFilesUrl("", { path }));
+        const payload = await this.api(this.projectFilesUrl("", {
+          path,
+          show_hidden: this.fileShowHidden,
+        }));
         if (this.projectKey !== projectKey) return false;
         this.fileDirectories = {
           ...this.fileDirectories,

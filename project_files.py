@@ -188,12 +188,19 @@ class ProjectFileManager:
             "modified_at": metadata.st_mtime_ns // 1_000_000,
         }
 
-    def list_directory(self, relative_path: str = "") -> dict[str, Any]:
+    def list_directory(
+        self,
+        relative_path: str = "",
+        *,
+        show_hidden: bool = False,
+    ) -> dict[str, Any]:
         directory = self._directory(relative_path)
         entries: list[dict[str, Any]] = []
         try:
             with os.scandir(directory) as iterator:
                 for directory_entry in iterator:
+                    if not show_hidden and directory_entry.name.startswith("."):
+                        continue
                     # Symbolic links and special files are deliberately not exposed in the
                     # browser, so they cannot become a path into another filesystem tree.
                     if directory_entry.is_symlink():

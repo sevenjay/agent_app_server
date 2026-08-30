@@ -148,6 +148,9 @@ def test_files_tab_provides_lazy_tree_and_guarded_file_operations() -> None:
     assert 'x-show="conversationTab === \'files\'"' in html
     files_tab_start = html.index('id="conversation-tab-files"')
     assert html.index("Live changes") < html.index("Files", files_tab_start)
+    assert html.index("Show hidden files") < html.index("Upload files")
+    assert 'x-model="fileShowHidden"' in html
+    assert '@change="refreshProjectFiles()"' in html
     assert "Upload files" in html
     assert "New folder" in html
     assert ">Refresh</button>" in html
@@ -160,6 +163,8 @@ def test_files_tab_provides_lazy_tree_and_guarded_file_operations() -> None:
     assert '>Download</button>' in html
     assert ':disabled="fileOperationBusy"' in html
     assert "async loadFileDirectory(path)" in javascript
+    assert "fileShowHidden: false" in javascript
+    assert "show_hidden: this.fileShowHidden" in javascript
     assert 'if (!Object.hasOwn(this.fileDirectories, entry.path))' in javascript
     assert "async uploadProjectFiles(event)" in javascript
     assert "async downloadProjectFile(entry = this.selectedFileEntry)" in javascript
@@ -173,6 +178,7 @@ def test_files_tab_provides_lazy_tree_and_guarded_file_operations() -> None:
     assert "this.showFileError(error);" in javascript
     assert ".file-tree-row" in tailwind
     assert ".files-error" in tailwind
+    assert ".files-hidden-toggle" in tailwind
 
 
 def test_latest_changes_use_a_readable_diff_view() -> None:

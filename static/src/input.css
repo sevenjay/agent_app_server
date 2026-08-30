@@ -1062,9 +1062,37 @@
   }
 
   .files-toolbar {
+    align-items: center;
     display: flex;
     flex-wrap: wrap;
     gap: 0.5rem;
+  }
+
+  .files-hidden-toggle {
+    align-items: center;
+    color: oklch(0.72 0.02 250);
+    cursor: pointer;
+    display: inline-flex;
+    font-size: 0.72rem;
+    gap: 0.4rem;
+    min-height: 1.75rem;
+    white-space: nowrap;
+  }
+
+  .files-hidden-toggle input {
+    accent-color: var(--color-brand-500);
+    cursor: pointer;
+    height: 0.9rem;
+    width: 0.9rem;
+  }
+
+  .files-hidden-toggle:has(input:disabled) {
+    cursor: not-allowed;
+    opacity: 0.45;
+  }
+
+  .files-hidden-toggle input:disabled {
+    cursor: not-allowed;
   }
 
   .files-empty-state,

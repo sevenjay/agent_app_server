@@ -26,6 +26,8 @@ async def test_project_files_list_directories_before_sorted_files(tmp_path: Path
     project.mkdir()
     (project / "zeta").mkdir()
     (project / "Alpha").mkdir()
+    (project / ".git").mkdir()
+    (project / ".env").write_text("SECRET=test", encoding="utf-8")
     (project / "beta.txt").write_text("beta", encoding="utf-8")
     (project / "aardvark.txt").write_text("aardvark", encoding="utf-8")
     (project / "Alpha" / "nested.txt").write_text("nested", encoding="utf-8")
@@ -36,6 +38,10 @@ async def test_project_files_list_directories_before_sorted_files(tmp_path: Path
         nested = await client.get(
             "/api/projects/files_project/files",
             params={"path": "Alpha"},
+        )
+        root_with_hidden = await client.get(
+            "/api/projects/files_project/files",
+            params={"show_hidden": "true"},
         )
 
     assert root.status_code == 200
@@ -49,6 +55,14 @@ async def test_project_files_list_directories_before_sorted_files(tmp_path: Path
     assert "nested.txt" not in {item["name"] for item in root.json()["data"]}
     assert nested.json()["path"] == "Alpha"
     assert nested.json()["data"][0]["path"] == "Alpha/nested.txt"
+    assert [item["name"] for item in root_with_hidden.json()["data"]] == [
+        ".git",
+        "Alpha",
+        "zeta",
+        ".env",
+        "aardvark.txt",
+        "beta.txt",
+    ]
 
 
 @pytest.mark.asyncio

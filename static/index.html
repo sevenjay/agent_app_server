@@ -319,6 +319,15 @@
                     :disabled="fileOperationBusy"
                     @change="uploadProjectFiles($event)"
                   >
+                  <label class="files-hidden-toggle">
+                    <input
+                      type="checkbox"
+                      x-model="fileShowHidden"
+                      :disabled="fileOperationBusy || fileTreeLoading"
+                      @change="refreshProjectFiles()"
+                    >
+                    <span>Show hidden files</span>
+                  </label>
                   <button
                     type="button"
                     class="button-secondary"

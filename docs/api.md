@@ -24,7 +24,7 @@ Web UI 稱一段對話為 Session；API 與 Codex SDK 使用 Thread／`thread`�
 
 | Method | Path | 用途 |
 | --- | --- | --- |
-| `GET` | `/api/projects/{project_key}/files?path=` | 列出一層目錄內容 |
+| `GET` | `/api/projects/{project_key}/files?path=&show_hidden=false` | 列出一層目錄內容；預設略過 `.` 開頭項目 |
 | `GET` | `/api/projects/{project_key}/files/download?path=` | 下載單一 regular file |
 | `POST` | `/api/projects/{project_key}/files/directories` | 建立資料夾；JSON body 為 `path`、`name` |
 | `POST` | `/api/projects/{project_key}/files/upload?path=&name=&overwrite=` | 以 raw request body 上傳一個檔案 |
