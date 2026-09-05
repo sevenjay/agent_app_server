@@ -817,7 +817,12 @@ async def test_interrupt_completion_race_is_reported_as_conflict(
         handle=fake.handles.setdefault("thr_one", object()),
     )
 
-    async def completed_before_interrupt(_thread_id: str) -> None:
+    async def completed_before_interrupt(
+        _thread_id: str,
+        *,
+        owner_id: str | None = None,
+    ) -> None:
+        del owner_id
         raise TurnNotActiveError
 
     service.turn_manager.interrupt = completed_before_interrupt  # type: ignore[method-assign]

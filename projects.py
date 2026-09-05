@@ -10,7 +10,6 @@ from pathlib import Path
 from threading import RLock
 from typing import Any
 
-
 PROJECT_KEY_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 PROJECT_NAME_MAX_BYTES = 255
 
@@ -91,6 +90,7 @@ class ProjectRegistry:
         *,
         root: Path | None = None,
         hidden_projects: Iterable[str] = (),
+        directory_mode: int = 0o755,
     ) -> None:
         self._lock = RLock()
         self._root = root
@@ -99,6 +99,7 @@ class ProjectRegistry:
             for value in hidden_projects
             if (identifier := str(value).strip())
         )
+        self._directory_mode = directory_mode
         self._by_key: dict[str, Project] = {}
         self._by_path: dict[Path, Project] = {}
         self._replace(projects)
@@ -124,6 +125,30 @@ class ProjectRegistry:
             by_path[project.path] = project
         self._by_key = by_key
         self._by_path = by_path
+
+    @classmethod
+    def from_root(
+        cls,
+        root: Path,
+        *,
+        hidden_projects: Iterable[str] = (),
+        directory_mode: int = 0o755,
+    ) -> ProjectRegistry:
+        """Create a dynamic registry rooted at one already-validated directory."""
+        try:
+            resolved_root = root.expanduser().resolve(strict=True)
+        except OSError as exc:
+            raise ProjectRegistryError("Configured Codex project root does not exist") from exc
+        if not resolved_root.is_dir():
+            raise ProjectRegistryError("Configured Codex project root is not a directory")
+        registry = cls(
+            (),
+            root=resolved_root,
+            hidden_projects=hidden_projects,
+            directory_mode=directory_mode,
+        )
+        registry.refresh()
+        return registry
 
     @classmethod
     def from_settings(
@@ -155,12 +180,10 @@ class ProjectRegistry:
                 raise ProjectRegistryError(
                     "Configured codex_projects_root is not a directory"
                 )
-            registry = cls(
-                (),
-                root=root,
+            registry = cls.from_root(
+                root,
                 hidden_projects=raw_hidden_projects,
             )
-            registry.refresh()
             return registry
 
         raw_projects = list(getattr(settings_obj, "codex_projects", ()) or ())
@@ -251,7 +274,7 @@ class ProjectRegistry:
             raise ProjectRootNotConfiguredError
         target = self._root / project_name
         try:
-            target.mkdir(mode=0o755)
+            target.mkdir(mode=self._directory_mode)
         except FileExistsError as exc:
             raise ProjectAlreadyExistsError(project_name) from exc
         except OSError as exc:

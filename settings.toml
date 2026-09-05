@@ -2,6 +2,12 @@
 app_name = "agent_app_server"
 log_level = "DEBUG"
 
+# Deployment mode: "single_user" keeps the existing header-free layout;
+# "multi_tenant" trusts identity headers injected by an upstream oauth2-proxy.
+deployment_mode = "single_user"
+oauth2_proxy_subject_header = "X-Forwarded-User"
+oauth2_proxy_username_header = "X-Forwarded-Preferred-Username"
+
 # Relative paths are resolved from the repository root.
 database_path = "../agent_app_server_data/app.db"
 database_echo = false

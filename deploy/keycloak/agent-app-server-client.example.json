@@ -1,0 +1,29 @@
+{
+  "clientId": "agent-app-server",
+  "name": "Agent App Server",
+  "enabled": true,
+  "protocol": "openid-connect",
+  "clientAuthenticatorType": "client-secret",
+  "secret": "REPLACE_WITH_A_RANDOM_CLIENT_SECRET",
+  "publicClient": false,
+  "standardFlowEnabled": true,
+  "directAccessGrantsEnabled": false,
+  "implicitFlowEnabled": false,
+  "serviceAccountsEnabled": false,
+  "redirectUris": [
+    "https://console.example.com/oauth2/callback"
+  ],
+  "webOrigins": [
+    "https://console.example.com"
+  ],
+  "attributes": {
+    "pkce.code.challenge.method": "S256"
+  },
+  "defaultClientScopes": [
+    "web-origins",
+    "acr",
+    "profile",
+    "roles",
+    "email"
+  ]
+}

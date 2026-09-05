@@ -33,6 +33,7 @@ _RESYNC = object()
 
 @dataclass(eq=False, slots=True)
 class Subscription:
+    owner_id: str | None
     thread_id: str
     queue: asyncio.Queue[EventEnvelope | object]
     initial_events: list[EventEnvelope]
@@ -53,15 +54,16 @@ class EventHub:
             raise ValueError("EventHub limits must be positive")
         self._history_limit = history_limit
         self._subscriber_queue_limit = subscriber_queue_limit
-        self._threads: dict[str, _ThreadEvents] = {}
+        self._threads: dict[tuple[str | None, str], _ThreadEvents] = {}
         self._lock = asyncio.Lock()
         self._dropped_subscribers = 0
 
-    def _state(self, thread_id: str) -> _ThreadEvents:
-        state = self._threads.get(thread_id)
+    def _state(self, thread_id: str, owner_id: str | None) -> _ThreadEvents:
+        key = (owner_id, thread_id)
+        state = self._threads.get(key)
         if state is None:
             state = _ThreadEvents(history=deque(maxlen=self._history_limit))
-            self._threads[thread_id] = state
+            self._threads[key] = state
         return state
 
     async def publish(
@@ -73,9 +75,10 @@ class EventHub:
         data: dict[str, Any] | None = None,
         turn_id: str | None = None,
         sequence: int | None = None,
+        owner_id: str | None = None,
     ) -> EventEnvelope:
         async with self._lock:
-            state = self._state(thread_id)
+            state = self._state(thread_id, owner_id)
             if sequence is None:
                 state.sequence += 1
             elif sequence <= state.sequence:
@@ -108,9 +111,10 @@ class EventHub:
         thread_id: str,
         *,
         after_sequence: int | None = None,
+        owner_id: str | None = None,
     ) -> Subscription:
         async with self._lock:
-            state = self._state(thread_id)
+            state = self._state(thread_id, owner_id)
             history = list(state.history)
             resync_required = False
             initial: list[EventEnvelope] = []
@@ -122,6 +126,7 @@ class EventHub:
                 else:
                     initial = [event for event in history if event.sequence > after_sequence]
             subscription = Subscription(
+                owner_id=owner_id,
                 thread_id=thread_id,
                 queue=asyncio.Queue(maxsize=self._subscriber_queue_limit),
                 initial_events=initial,
@@ -132,7 +137,9 @@ class EventHub:
 
     async def close(self, subscription: Subscription) -> None:
         async with self._lock:
-            state = self._threads.get(subscription.thread_id)
+            state = self._threads.get(
+                (subscription.owner_id, subscription.thread_id)
+            )
             if state is not None:
                 state.subscribers.discard(subscription)
             subscription.closed = True
@@ -144,21 +151,36 @@ class EventHub:
         assert isinstance(item, EventEnvelope)
         return item
 
-    async def current_sequence(self, thread_id: str) -> int:
+    async def current_sequence(
+        self,
+        thread_id: str,
+        *,
+        owner_id: str | None = None,
+    ) -> int:
         async with self._lock:
-            return self._state(thread_id).sequence
+            return self._state(thread_id, owner_id).sequence
 
-    async def advance_sequence(self, thread_id: str, sequence: int) -> None:
+    async def advance_sequence(
+        self,
+        thread_id: str,
+        sequence: int,
+        *,
+        owner_id: str | None = None,
+    ) -> None:
         """Align a restarted in-memory hub with a durable Journal high-water mark."""
         if sequence < 0:
             raise ValueError("Event sequence cannot be negative")
         async with self._lock:
-            state = self._state(thread_id)
+            state = self._state(thread_id, owner_id)
             state.sequence = max(state.sequence, sequence)
 
-    async def subscriber_count(self) -> int:
+    async def subscriber_count(self, *, owner_id: str | None = None) -> int:
         async with self._lock:
-            return sum(len(state.subscribers) for state in self._threads.values())
+            return sum(
+                len(state.subscribers)
+                for (state_owner_id, _thread_id), state in self._threads.items()
+                if owner_id is None or state_owner_id == owner_id
+            )
 
     @property
     def dropped_subscriber_count(self) -> int:

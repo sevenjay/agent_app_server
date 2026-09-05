@@ -1,0 +1,26 @@
+# oauth2-proxy is the public upstream for Agent App Server. Supply secrets with
+# OAUTH2_PROXY_CLIENT_SECRET and OAUTH2_PROXY_COOKIE_SECRET rather than storing
+# them in this file.
+
+http_address = "0.0.0.0:4180"
+provider = "keycloak-oidc"
+provider_display_name = "Keycloak"
+oidc_issuer_url = "https://auth.example.com/realms/agent-app"
+client_id = "agent-app-server"
+redirect_url = "https://console.example.com/oauth2/callback"
+upstreams = ["http://127.0.0.1:8080/"]
+
+scope = "openid profile email"
+email_domains = ["*"]
+code_challenge_method = "S256"
+skip_provider_button = true
+
+reverse_proxy = true
+pass_user_headers = true
+set_xauthrequest = true
+
+cookie_secure = true
+cookie_httponly = true
+cookie_samesite = "lax"
+cookie_expire = "8h"
+cookie_refresh = "1h"

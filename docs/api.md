@@ -110,4 +110,6 @@ SSE 支援 `Last-Event-ID`、`after_sequence` query cursor、JSONL durable repla
 
 ## Authentication 狀態
 
-`/api/projects`、`/api/codex`、`/api/preferences` 與 `/partials` routes 都接上 `require_web_user` dependency；`/`、`/static`、`/api/status` 與 OpenAPI endpoints 則不經過它。該 dependency 目前仍不執行真正的 authentication，因此服務只能放在 loopback，或已有可靠 authentication、TLS 與 network access control 的受信任環境中。
+`/api/projects`、`/api/codex`、`/api/preferences` 與 `/partials` routes 都接上 `require_web_user` dependency；`/`、`/static`、`/api/status` 與 OpenAPI endpoints 不經過它。
+
+`single_user` 模式直接建立固定 local identity。`multi_tenant` 模式要求 oauth2-proxy 的 subject 與 preferred-username headers，並將 Project、Thread、SSE、metadata 與 preferences 限制在該 tenant。詳細 `/api/status` 刻意維持公開，可能揭露共用 Codex account 與 runtime 資訊。

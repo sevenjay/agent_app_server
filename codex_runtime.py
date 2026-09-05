@@ -201,12 +201,14 @@ class CodexRuntime:
         self,
         *,
         settings_obj: Any,
-        registry: ProjectRegistry,
+        registry: ProjectRegistry | None,
+        initial_tenant_id: str | None = None,
         client_factory: Callable[[], Any] = AsyncCodex,
         enabled: bool | None = None,
     ) -> None:
         self.settings = settings_obj
         self.registry = registry
+        self.initial_tenant_id = initial_tenant_id
         self.client_factory = client_factory
         self.enabled = (
             bool(getattr(settings_obj, "codex_enabled", True))
@@ -223,6 +225,8 @@ class CodexRuntime:
         self.turn_manager = TurnManager()
         self.client: Any = None
         self.service: CodexService | None = None
+        self._services: dict[str | None, CodexService] = {}
+        self._thread_services: dict[str, CodexService] = {}
         self._global_notification_task: asyncio.Task[None] | None = None
         self._health_sample_task: asyncio.Task[None] | None = None
         self.ready = False
@@ -294,39 +298,24 @@ class CodexRuntime:
                 raise ConsoleUnavailable("The service account is not logged in to Codex")
             self.account_available = account is not None
             self.account_label = _account_label(account)
-            self.service = CodexService(
-                client,
-                registry=self.registry,
-                event_hub=self.event_hub,
-                turn_manager=self.turn_manager,
-                approval_mode=_approval_mode(
-                    str(getattr(self.settings, "codex_approval_mode", "auto_review"))
-                ),
-                sandbox=_sandbox(
-                    str(getattr(self.settings, "codex_sandbox", "workspace_write"))
-                ),
-                stream_journal=self.stream_journal,
-                operation_timeout=float(
-                    getattr(self.settings, "codex_operation_timeout_seconds", 30)
-                ),
-                turn_idle_reconcile_seconds=float(
-                    getattr(self.settings, "codex_turn_idle_reconcile_seconds", 2)
-                ),
-                lookup_page_limit=int(
-                    getattr(self.settings, "codex_thread_lookup_page_limit", 50)
-                ),
-            )
-            self.stream_journal.prune_retention(
-                [project.path for project in self.registry],
-                days=int(getattr(self.settings, "codex_journal_retention_days", 30)),
-            )
+            if self.registry is not None:
+                self.service = self._create_service(
+                    tenant_id=self.initial_tenant_id,
+                    registry=self.registry,
+                )
+                self.stream_journal.prune_retention(
+                    [project.path for project in self.registry],
+                    days=int(
+                        getattr(self.settings, "codex_journal_retention_days", 30)
+                    ),
+                )
             await self._sample_rate_limits(client)
             self.ready = True
             self._start_global_notification_pump(client)
             self._start_health_sample_loop(client)
             LOGD(
                 f"codex_runtime_ready account_available={self.account_available} "
-                f"project_count={len(self.registry)}"
+                f"project_count={len(self.registry) if self.registry is not None else 0}"
             )
             LOGI("Codex runtime started and account health check completed")
         except Exception as exc:
@@ -340,6 +329,8 @@ class CodexRuntime:
                 LOGW(f"Codex startup cleanup failed: {type(close_exc).__name__}")
             self.client = None
             self.service = None
+            self._services.clear()
+            self._thread_services.clear()
             self.ready = False
             self.account_available = False
             self.account_label = None
@@ -369,6 +360,8 @@ class CodexRuntime:
         client = self.client
         self.client = None
         self.service = None
+        self._services.clear()
+        self._thread_services.clear()
         self.account_label = None
         self.rate_limits = []
         self.rate_limits_sampled_at = None
@@ -493,7 +486,9 @@ class CodexRuntime:
                 thread_id = data.get("thread_id") or data.get("threadId")
                 if not isinstance(thread_id, str) or not thread_id:
                     continue
-                service = self.service
+                service = self._thread_services.get(thread_id)
+                if service is None and len(self._services) == 1:
+                    service = next(iter(self._services.values()))
                 if service is None:
                     continue
                 try:
@@ -536,18 +531,81 @@ class CodexRuntime:
             raise
         LOGD(f"codex_runtime_client_close_complete client_type={type(client).__name__}")
 
-    def require_service(self) -> CodexService:
-        if not self.ready or self.service is None:
+    def _create_service(
+        self,
+        *,
+        tenant_id: str | None,
+        registry: ProjectRegistry,
+    ) -> CodexService:
+        if self.client is None:
+            raise ConsoleUnavailable
+
+        service: CodexService
+
+        def register_thread(thread_id: str) -> None:
+            self._thread_services[thread_id] = service
+
+        service = CodexService(
+            self.client,
+            registry=registry,
+            event_hub=self.event_hub,
+            turn_manager=self.turn_manager,
+            approval_mode=_approval_mode(
+                str(getattr(self.settings, "codex_approval_mode", "auto_review"))
+            ),
+            sandbox=_sandbox(
+                str(getattr(self.settings, "codex_sandbox", "workspace_write"))
+            ),
+            stream_journal=self.stream_journal,
+            operation_timeout=float(
+                getattr(self.settings, "codex_operation_timeout_seconds", 30)
+            ),
+            turn_idle_reconcile_seconds=float(
+                getattr(self.settings, "codex_turn_idle_reconcile_seconds", 2)
+            ),
+            lookup_page_limit=int(
+                getattr(self.settings, "codex_thread_lookup_page_limit", 50)
+            ),
+            tenant_id=tenant_id,
+            on_thread_authorized=register_thread,
+        )
+        self._services[tenant_id] = service
+        return service
+
+    def require_service(
+        self,
+        *,
+        tenant_id: str | None = None,
+        registry: ProjectRegistry | None = None,
+    ) -> CodexService:
+        if not self.ready or self.client is None:
             LOGD(
                 f"codex_runtime_service_unavailable ready={self.ready} "
                 f"service_present={self.service is not None} "
                 f"client_present={self.client is not None}"
             )
             raise ConsoleUnavailable
-        return self.service
+        service = self._services.get(tenant_id)
+        if service is not None:
+            return service
+        if tenant_id is None and self.service is not None:
+            return self.service
+        if registry is None:
+            raise ConsoleUnavailable
+        service = self._create_service(tenant_id=tenant_id, registry=registry)
+        self.stream_journal.prune_retention(
+            [project.path for project in registry],
+            days=int(getattr(self.settings, "codex_journal_retention_days", 30)),
+        )
+        return service
 
-    async def status(self) -> dict[str, Any]:
-        turn_status = await self.turn_manager.status()
+    async def status(
+        self,
+        *,
+        tenant_id: str | None = None,
+        registry: ProjectRegistry | None = None,
+    ) -> dict[str, Any]:
+        turn_status = await self.turn_manager.status(owner_id=tenant_id)
         approval_mode = str(
             getattr(self.settings, "codex_approval_mode", "auto_review")
         )
@@ -568,9 +626,19 @@ class CodexRuntime:
             "sandbox": sandbox,
             "accepting_turns": turn_status["accepting_turns"] and self.ready,
             "active_turn_count": turn_status["active_turn_count"],
-            "subscriber_count": await self.event_hub.subscriber_count(),
+            "subscriber_count": await self.event_hub.subscriber_count(
+                owner_id=tenant_id,
+            ),
             "dropped_subscriber_count": self.event_hub.dropped_subscriber_count,
             "journal": self.stream_journal.stats(
-                [project.path for project in self.registry]
+                [
+                    project.path
+                    for current_registry in (
+                        [registry]
+                        if registry is not None
+                        else [service.registry for service in self._services.values()]
+                    )
+                    for project in current_registry
+                ]
             ),
         }

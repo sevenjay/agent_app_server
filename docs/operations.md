@@ -59,7 +59,7 @@ export ENV_FOR_DYNACONF=production
 | `production` | `0.0.0.0:8080` | `localhost`、`127.0.0.1`、`192.168.50.234` | 繼承 `auto_review` / `workspace_write` |
 
 > [!WARNING]
-> `TrustedHostMiddleware` 只驗證 HTTP `Host` header，不提供使用者驗證。production 目前也不會自動切換成較保守的 Codex permissions。部署者必須在 `.secrets.toml` 覆寫合適的 bind、trusted hosts、approval mode 與 sandbox，並提供 authentication、TLS 或等價的受信任存取層。
+> `TrustedHostMiddleware` 只驗證 HTTP `Host` header。`multi_tenant` 只信任 oauth2-proxy headers，因此 backend 必須限制為 proxy 可連；`single_user` 則必須保持在受信任網路。production 不會自動切換成較保守的 Codex permissions。
 
 建議以 host-specific 值覆寫，例如：
 
@@ -90,6 +90,16 @@ codex_thread_lookup_page_limit = 50
 codex_journal_retention_days = 30
 ```
 
+### Deployment mode
+
+```toml
+deployment_mode = "single_user" # 或 "multi_tenant"
+oauth2_proxy_subject_header = "X-Forwarded-User"
+oauth2_proxy_username_header = "X-Forwarded-Preferred-Username"
+```
+
+`single_user` 維持 `<codex_projects_root>/<project>` 且不要求 headers。`multi_tenant` 使用 `<codex_projects_root>/<username>/<project>`，並以 oauth2-proxy identity 建立 tenant scope。完整部署方式見 [Keycloak、oauth2-proxy 與多租戶部署](multi-tenant.md)。
+
 Web Permissions 卡片會用 Codex CLI 對應名稱呈現權限：
 
 | 設定值 | Codex CLI 對照 | 行為 |
@@ -102,7 +112,7 @@ Web Permissions 卡片會用 Codex CLI 對應名稱呈現權限：
 
 ### Project Registry
 
-`codex_projects_root` 必須指向存在且可讀的目錄，建議一律使用絕對路徑。server 在 startup 時會展開 `~`、`resolve()` root，並將每個第一層實體目錄註冊成 Project；symbolic link 不會被納入。
+`codex_projects_root` 必須指向存在且可讀的目錄，建議一律使用絕對路徑。單用戶模式會將 root 的第一層實體目錄註冊成 Project；多租戶模式則先選擇 username 目錄，再將其中的第一層實體目錄註冊成 Project。symbolic link 不會被納入。
 
 ```toml
 codex_projects_root = "/home/you/codex-workspaces"
@@ -125,10 +135,13 @@ Files API 只接受 project-relative path，拒絕 absolute path、`..`、backsl
 
 目前 schema：
 
-- `thread_ui_metadata`：project key、pin、custom label、last-opened 與 timestamps。
-- `app_settings`：最後選擇的 Project／Session 等少量 UI preferences。
+- `tenants`：external identity、username 與固定 workspace directory 的映射；不保存 credential 或 token。
+- `thread_ui_metadata`：以 tenant、thread 為 scope 的 project key、pin、custom label、last-opened 與 timestamps。
+- `app_settings`：以 tenant 為 scope 的 Project／Session 等少量 UI preferences。
 
 SQLite 不保存 prompt、agent response、command output、diff、Goal、token usage 或 Codex conversation mirror。
+
+升級到 tenant schema 時，既有 metadata 會歸入 `local-service-user`。從 tenant schema downgrade 只保留該 local owner 的 metadata，會捨棄其他 tenant mappings 與 UI metadata；執行 downgrade 前必須先備份 database。
 
 ## Stream Journal
 

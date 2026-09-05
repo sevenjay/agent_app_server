@@ -12,6 +12,19 @@ from turn_manager import (
 
 
 @pytest.mark.asyncio
+async def test_same_thread_id_can_run_for_different_owners() -> None:
+    manager = TurnManager()
+
+    alice = await manager.reserve("thr_shared", owner_id="alice")
+    bob = await manager.reserve("thr_shared", owner_id="bob")
+
+    assert alice.owner_id == "alice"
+    assert bob.owner_id == "bob"
+    assert (await manager.status(owner_id="alice"))["active_turn_count"] == 1
+    assert (await manager.status(owner_id="bob"))["active_turn_count"] == 1
+
+
+@pytest.mark.asyncio
 async def test_reserve_is_atomic_under_race() -> None:
     manager = TurnManager()
 

@@ -58,10 +58,11 @@ flowchart LR
 ### 邊界與信任模型
 
 - Browser 只提交 server 產生的 `project_key`，不能提交任意 CWD。建立 Project 時只能提交一個目錄名稱。
-- `ProjectRegistry` 只接受 `codex_projects_root` 的第一層實體目錄，忽略 symlink；名稱不符合安全 key 格式時會產生穩定、opaque 的 key。
+- `ProjectRegistry` 只接受目前 workspace scope root 的第一層實體目錄；單用戶 scope 是 `codex_projects_root`，多租戶 scope 是其中的 username 目錄。Registry 忽略 symlink，名稱不符合安全 key 格式時會產生穩定、opaque 的 key。
 - `ProjectFileManager` 只接受相對於 Project root 的 path，逐層拒絕 symlink、absolute path、path traversal、control characters 與 special file。Files UI 的修改與刪除會直接作用於 workspace。
 - `CodexService` 在 Thread list、resume 與 read 後持續核對實際 CWD。Thread 不屬於 registry 內 Project 時一律視為 `404`。
-- `require_web_user` 目前只是 authentication 的整合接點。development 綁定 loopback；版本庫內的 production 設定則綁定 `0.0.0.0:8080`。正式 authentication、TLS 與受信任的存取層完成前，production 必須覆寫回 loopback 或限制在可靠的內部存取層後方。
+- `require_web_user` 在 `single_user` 建立固定 local identity；在 `multi_tenant` 接受 oauth2-proxy 的 trusted identity headers，選出 tenant workspace、Project Registry 與 Codex service view。backend 必須限制為 proxy 可連，避免 Header spoofing。
+- 多租戶共用單一 `AsyncCodex` client、Linux service account 與 usage limit，但 EventHub、TurnManager、metadata、preferences、Project CWD 與 Stream Journal 都帶 tenant scope。這不是不同 UID/container 等級的強隔離。
 
 ## 元件責任
 

@@ -12,6 +12,7 @@ from database import async_session
 from main import create_app
 from models import ThreadUIMetadata
 from projects import Project, ProjectRegistry
+from tenancy import LOCAL_TENANT_ID
 from tests.fakes import FakeCodex
 from tests.http_client import application_client
 
@@ -118,6 +119,7 @@ async def test_status_api_and_static_shell_with_codex_disabled() -> None:
             "journal_mode": "wal",
         }
         assert payload["environment"] == "development"
+        assert payload["deployment_mode"] == "single_user"
         assert payload["version"] == main.APP_VERSION
         assert payload["scheduler"]["running"] is False
         assert payload["codex"]["enabled"] is False
@@ -246,7 +248,10 @@ async def test_account_models_projects_and_thread_crud() -> None:
         assert created_id not in refreshed.text
 
     async with async_session() as session:
-        assert await session.get(ThreadUIMetadata, created_id) is None
+        assert await session.get(
+            ThreadUIMetadata,
+            (LOCAL_TENANT_ID, created_id),
+        ) is None
 
 
 @pytest.mark.asyncio
@@ -849,6 +854,7 @@ def test_codex_and_partial_routes_use_web_user_dependency() -> None:
         for route in main.app.routes
         if getattr(route, "path", "").startswith("/api/codex/")
         or getattr(route, "path", "").startswith("/api/projects")
+        or getattr(route, "path", "").startswith("/api/preferences")
         or getattr(route, "path", "").startswith("/partials/")
     ]
     assert protected_routes
@@ -895,11 +901,13 @@ async def test_sse_response_headers_ready_event_and_cleanup() -> None:
         "thr_one",
         event_type="codex.notification",
         method="event/first",
+        owner_id=LOCAL_TENANT_ID,
     )
     second = await runtime.event_hub.publish(
         "thr_one",
         event_type="codex.notification",
         method="event/second",
+        owner_id=LOCAL_TENANT_ID,
     )
     request_with_query_cursor = Request(
         {
