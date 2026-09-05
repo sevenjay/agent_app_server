@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from config import BASE_DIR, settings
+from database_schema import INITIAL_REVISION, existing_schema_revision
 from models import Base
 
 
@@ -72,11 +73,18 @@ def _configure_sqlite(dbapi_connection, _connection_record) -> None:
 
 
 async def init_db() -> None:
-    """Create the initial schema and verify that SQLite is using WAL."""
+    """Check schema compatibility before serving requests and enable SQLite WAL."""
     database = engine.url.database
     ensure_sqlite_database_directory()
 
     async with engine.begin() as connection:
+        revision = await connection.run_sync(existing_schema_revision)
+        if revision == INITIAL_REVISION:
+            raise RuntimeError(
+                "Database schema needs migration. Back up the database with "
+                "'poetry run python -m scripts.backup_database', then run "
+                "'poetry run alembic upgrade head' before restarting the service."
+            )
         await connection.run_sync(Base.metadata.create_all)
         result = await connection.execute(text("PRAGMA journal_mode"))
         journal_mode = str(result.scalar_one()).lower()

@@ -21,7 +21,6 @@ from sqlalchemy import select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.trustedhost import TrustedHostMiddleware
-from utility.log import LOGD, LOGI, LOGW, initialLog, LOGException
 
 from codex_runtime import CodexRuntime
 from codex_service import (
@@ -36,6 +35,11 @@ from config import APP_VERSION, BASE_DIR, environment_settings, settings
 from database import database_status, dispose_engine, get_session, init_db
 from event_hub import EventEnvelope
 from models import AppSetting, ThreadUIMetadata
+from project_files import (
+    ProjectFileError,
+    ProjectFileManager,
+    ProjectNotFoundError,
+)
 from projects import (
     InvalidProjectNameError,
     ProjectAlreadyExistsError,
@@ -44,11 +48,6 @@ from projects import (
     ProjectRegistryError,
     ProjectRootNotConfiguredError,
     UnknownProjectError,
-)
-from project_files import (
-    ProjectFileError,
-    ProjectFileManager,
-    ProjectNotFoundError,
 )
 from runtime import ensure_log_directory, run_web_server
 from scheduler_runtime import scheduler_status, start_scheduler, stop_scheduler
@@ -65,6 +64,14 @@ from schemas import (
     TurnStart,
     TurnSteer,
 )
+from tenancy import (
+    TenantWorkspaceManager,
+    WebIdentityError,
+    WebIdentityRequired,
+    WebUserContext,
+    deployment_mode,
+)
+from utility.log import LOGD, LOGI, LOGW, LOGException, initialLog
 
 STATIC_DIR = BASE_DIR / "static"
 TEMPLATES_DIR = BASE_DIR / "templates"
@@ -91,24 +98,48 @@ def shutdown_database() -> None:
     LOGI("Database engine disposed")
 
 
-async def require_web_user() -> str:
-    """Single-user placeholder; this is an integration seam, not authentication."""
-    return "local-service-user"
+async def require_web_user(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> WebUserContext:
+    """Resolve a local or trusted oauth2-proxy identity for one request."""
+    manager: TenantWorkspaceManager = request.app.state.tenant_workspace_manager
+    context = await manager.resolve(request, session)
+    request.state.web_user = context
+    return context
+
+
+def _web_user(request: Request) -> WebUserContext:
+    context = getattr(request.state, "web_user", None)
+    if isinstance(context, WebUserContext):
+        return context
+    manager: TenantWorkspaceManager = request.app.state.tenant_workspace_manager
+    if manager.single_context is not None:
+        return manager.single_context
+    raise WebIdentityRequired
 
 
 def _service(request: Request) -> CodexService:
     runtime: CodexRuntime = request.app.state.codex_runtime
-    return runtime.require_service()
+    context = _web_user(request)
+    return runtime.require_service(
+        tenant_id=context.tenant_id,
+        registry=context.registry,
+    )
 
 
 async def _metadata_for_threads(
     session: AsyncSession,
+    tenant_id: str,
     thread_ids: list[str],
 ) -> dict[str, ThreadUIMetadata]:
     if not thread_ids:
         return {}
     result = await session.execute(
-        select(ThreadUIMetadata).where(ThreadUIMetadata.thread_id.in_(thread_ids))
+        select(ThreadUIMetadata).where(
+            ThreadUIMetadata.tenant_id == tenant_id,
+            ThreadUIMetadata.thread_id.in_(thread_ids),
+        )
     )
     return {item.thread_id: item for item in result.scalars()}
 
@@ -154,6 +185,7 @@ def _recent_plan_history(
 
 async def _touch_thread_metadata(
     session: AsyncSession,
+    tenant_id: str,
     thread: dict[str, Any],
     *,
     opened: bool = False,
@@ -170,19 +202,23 @@ async def _touch_thread_metadata(
     statement = (
         sqlite_insert(ThreadUIMetadata)
         .values(
+            tenant_id=tenant_id,
             thread_id=thread_id,
             project_key=project_key,
             pinned=False,
             last_opened_at=opened_at,
         )
         .on_conflict_do_update(
-            index_elements=[ThreadUIMetadata.thread_id],
+            index_elements=[
+                ThreadUIMetadata.tenant_id,
+                ThreadUIMetadata.thread_id,
+            ],
             set_=update_values,
         )
     )
     await session.execute(statement)
     await session.commit()
-    metadata = await session.get(ThreadUIMetadata, thread_id)
+    metadata = await session.get(ThreadUIMetadata, (tenant_id, thread_id))
     if metadata is None:
         raise RuntimeError("Thread metadata upsert did not return a row")
     return metadata
@@ -197,6 +233,7 @@ async def _status_payload(
         "service": str(getattr(settings, "app_name", "agent_app_server")),
         "version": APP_VERSION,
         "environment": str(settings.current_env),
+        "deployment_mode": request.app.state.tenant_workspace_manager.mode,
         "time_utc": datetime.now(timezone.utc).isoformat(),
         "database": await database_status(session),
         "scheduler": scheduler_status(),
@@ -234,14 +271,28 @@ def create_app(
     codex_client_factory: Callable[[], Any] | None = None,
     codex_enabled: bool | None = None,
     registry: ProjectRegistry | None = None,
+    tenant_workspace_manager: TenantWorkspaceManager | None = None,
 ) -> FastAPI:
-    project_registry = registry or ProjectRegistry.from_settings(settings)
+    selected_mode = deployment_mode(settings)
+    if tenant_workspace_manager is None:
+        project_registry = registry
+        if project_registry is None and selected_mode == "single_user":
+            project_registry = ProjectRegistry.from_settings(settings)
+        tenant_workspace_manager = TenantWorkspaceManager.from_settings(
+            settings,
+            single_registry=project_registry,
+        )
+    single_context = tenant_workspace_manager.single_context
+    project_registry = single_context.registry if single_context is not None else None
     runtime_kwargs: dict[str, Any] = {}
     if codex_client_factory is not None:
         runtime_kwargs["client_factory"] = codex_client_factory
     codex_runtime = CodexRuntime(
         settings_obj=settings,
         registry=project_registry,
+        initial_tenant_id=(
+            single_context.tenant_id if single_context is not None else None
+        ),
         enabled=codex_enabled,
         **runtime_kwargs,
     )
@@ -264,6 +315,7 @@ def create_app(
     )
     application.state.codex_runtime = codex_runtime
     application.state.project_registry = project_registry
+    application.state.tenant_workspace_manager = tenant_workspace_manager
 
     selected_environment = environment_settings()
     trusted_hosts = list(getattr(selected_environment, "trusted_hosts", ()))
@@ -312,6 +364,29 @@ def create_app(
                     "message": ConsoleProjectUnavailable.safe_message,
                 }
             },
+        )
+
+    @application.exception_handler(WebIdentityError)
+    async def web_identity_error_handler(
+        request: Request,
+        exc: WebIdentityError,
+    ) -> JSONResponse:
+        LOGD(
+            f"console_request_error request_id={_request_id(request)} "
+            f"method={request.method} path={request.url.path} "
+            f"status={exc.status_code} code={exc.code} "
+            f"exception={type(exc).__name__}"
+        )
+        headers = {"WWW-Authenticate": "Bearer"} if exc.status_code == 401 else None
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "error": {
+                    "code": exc.code,
+                    "message": exc.safe_message,
+                }
+            },
+            headers=headers,
         )
 
     @application.exception_handler(ProjectFileError)
@@ -406,7 +481,7 @@ def create_app(
         dependencies=[Depends(require_web_user)],
     )
     async def api_projects(request: Request) -> dict[str, Any]:
-        current_registry: ProjectRegistry = request.app.state.project_registry
+        current_registry = _web_user(request).registry
         return {"data": current_registry.public_view()}
 
     @application.post(
@@ -418,7 +493,7 @@ def create_app(
         request: Request,
         command: ProjectCreate,
     ) -> dict[str, str]:
-        current_registry: ProjectRegistry = request.app.state.project_registry
+        current_registry = _web_user(request).registry
         LOGD(
             f"console_project_create_start request_id={_request_id(request)}"
         )
@@ -438,7 +513,7 @@ def create_app(
 
     def project_file_manager(request: Request, project_key: str) -> ProjectFileManager:
         try:
-            project = request.app.state.project_registry.get(project_key)
+            project = _web_user(request).registry.get(project_key)
         except UnknownProjectError as exc:
             raise ProjectNotFoundError from exc
         return ProjectFileManager(project)
@@ -575,6 +650,7 @@ def create_app(
         limit: Annotated[int, Query(ge=1, le=100)] = 30,
         session: AsyncSession = Depends(get_session),
     ) -> dict[str, Any]:
+        context = _web_user(request)
         payload = await _service(request).list_threads(
             project_key=project_key,
             archived=archived,
@@ -583,10 +659,13 @@ def create_app(
         )
         metadata = await _metadata_for_threads(
             session,
+            context.tenant_id,
             [str(thread["id"]) for thread in payload["data"]],
         )
         active_threads = (
-            await request.app.state.codex_runtime.turn_manager.status()
+            await request.app.state.codex_runtime.turn_manager.status(
+                owner_id=context.tenant_id,
+            )
         )["active_threads"]
         payload["data"] = [
             {
@@ -636,7 +715,12 @@ def create_app(
                 model=command.model,
             )
         )
-        metadata = await _touch_thread_metadata(session, thread, opened=True)
+        metadata = await _touch_thread_metadata(
+            session,
+            _web_user(request).tenant_id,
+            thread,
+            opened=True,
+        )
         decorated = _decorate_thread(thread, metadata)
         LOGD(
             f"console_thread_create_complete request_id={_request_id(request)} "
@@ -654,7 +738,12 @@ def create_app(
         session: AsyncSession = Depends(get_session),
     ) -> dict[str, Any]:
         thread = await _service(request).read_thread(thread_id, include_turns=True)
-        metadata = await _touch_thread_metadata(session, thread, opened=True)
+        metadata = await _touch_thread_metadata(
+            session,
+            _web_user(request).tenant_id,
+            thread,
+            opened=True,
+        )
         return _decorate_thread(thread, metadata)
 
     @application.get(
@@ -667,7 +756,12 @@ def create_app(
         session: AsyncSession = Depends(get_session),
     ) -> dict[str, Any]:
         thread = await _service(request).snapshot_thread(thread_id)
-        metadata = await _touch_thread_metadata(session, thread, opened=True)
+        metadata = await _touch_thread_metadata(
+            session,
+            _web_user(request).tenant_id,
+            thread,
+            opened=True,
+        )
         return _decorate_thread(thread, metadata)
 
     @application.patch(
@@ -688,7 +782,11 @@ def create_app(
             if "name" in command.model_fields_set and command.name is not None
             else await service.read_thread(thread_id, include_turns=True)
         )
-        metadata = await _touch_thread_metadata(session, thread)
+        metadata = await _touch_thread_metadata(
+            session,
+            _web_user(request).tenant_id,
+            thread,
+        )
         if "pinned" in command.model_fields_set and command.pinned is not None:
             metadata.pinned = command.pinned
         if "custom_label" in command.model_fields_set:
@@ -708,7 +806,10 @@ def create_app(
         session: Annotated[AsyncSession, Depends(get_session)],
     ) -> Response:
         await _service(request).delete_thread(thread_id)
-        metadata = await session.get(ThreadUIMetadata, thread_id)
+        metadata = await session.get(
+            ThreadUIMetadata,
+            (_web_user(request).tenant_id, thread_id),
+        )
         if metadata is not None:
             await session.delete(metadata)
             await session.commit()
@@ -725,7 +826,12 @@ def create_app(
         session: AsyncSession = Depends(get_session),
     ) -> dict[str, Any]:
         thread = await _service(request).fork_thread(thread_id)
-        metadata = await _touch_thread_metadata(session, thread, opened=True)
+        metadata = await _touch_thread_metadata(
+            session,
+            _web_user(request).tenant_id,
+            thread,
+            opened=True,
+        )
         return _decorate_thread(thread, metadata)
 
     @application.post(
@@ -965,9 +1071,13 @@ def create_app(
         dependencies=[Depends(require_web_user)],
     )
     async def api_preferences(
+        request: Request,
         session: AsyncSession = Depends(get_session),
     ) -> dict[str, str]:
-        result = await session.execute(select(AppSetting))
+        tenant_id = _web_user(request).tenant_id
+        result = await session.execute(
+            select(AppSetting).where(AppSetting.tenant_id == tenant_id)
+        )
         return {
             setting.setting_key: setting.setting_value
             for setting in result.scalars()
@@ -982,12 +1092,13 @@ def create_app(
         command: PreferencesUpdate,
         session: AsyncSession = Depends(get_session),
     ) -> dict[str, str | None]:
+        tenant_id = _web_user(request).tenant_id
         values = command.model_dump(exclude_unset=True)
         if not values:
             raise ConsoleBadRequest
         if project_key := values.get("selected_project_key"):
             try:
-                request.app.state.project_registry.get(project_key)
+                _web_user(request).registry.get(project_key)
             except UnknownProjectError as exc:
                 raise ConsoleNotFound from exc
         if thread_id := values.get("selected_thread_id"):
@@ -1001,12 +1112,18 @@ def create_app(
                 f"request_id={_request_id(request)} thread_id={thread_id}"
             )
         for key, value in values.items():
-            setting = await session.get(AppSetting, key)
+            setting = await session.get(AppSetting, (tenant_id, key))
             if value is None:
                 if setting is not None:
                     await session.delete(setting)
             elif setting is None:
-                session.add(AppSetting(setting_key=key, setting_value=value))
+                session.add(
+                    AppSetting(
+                        tenant_id=tenant_id,
+                        setting_key=key,
+                        setting_value=value,
+                    )
+                )
             else:
                 setting.setting_value = value
         await session.commit()
@@ -1036,7 +1153,7 @@ def create_app(
         return templates.TemplateResponse(
             request,
             "_project_selector.html",
-            {"projects": request.app.state.project_registry.public_view()},
+            {"projects": _web_user(request).registry.public_view()},
         )
 
     @application.get(
@@ -1054,6 +1171,7 @@ def create_app(
         cursor: Annotated[str | None, Query(max_length=2048)] = None,
         session: AsyncSession = Depends(get_session),
     ):
+        context = _web_user(request)
         payload = await _service(request).list_threads(
             project_key=project_key,
             archived=archived,
@@ -1062,10 +1180,13 @@ def create_app(
         )
         metadata = await _metadata_for_threads(
             session,
+            context.tenant_id,
             [str(thread["id"]) for thread in payload["data"]],
         )
         active_threads = (
-            await request.app.state.codex_runtime.turn_manager.status()
+            await request.app.state.codex_runtime.turn_manager.status(
+                owner_id=context.tenant_id,
+            )
         )["active_threads"]
         threads = [
             {
@@ -1096,9 +1217,17 @@ def create_app(
             f"console_thread_partial_start request_id={_request_id(request)} "
             f"path={request.url.path} thread_id={thread_id}"
         )
+        context = _web_user(request)
         thread = await _service(request).read_thread(thread_id, include_turns=True)
-        metadata = await _touch_thread_metadata(session, thread, opened=True)
-        state = await request.app.state.codex_runtime.turn_manager.status()
+        metadata = await _touch_thread_metadata(
+            session,
+            context.tenant_id,
+            thread,
+            opened=True,
+        )
+        state = await request.app.state.codex_runtime.turn_manager.status(
+            owner_id=context.tenant_id,
+        )
         LOGD(
             f"console_thread_partial_complete request_id={_request_id(request)} "
             f"path={request.url.path} thread_id={thread_id}"

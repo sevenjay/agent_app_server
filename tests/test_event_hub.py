@@ -55,3 +55,36 @@ async def test_backend_restart_last_event_id_requires_resync() -> None:
     restarted_hub = EventHub(history_limit=2, subscriber_queue_limit=1)
     subscription = await restarted_hub.subscribe("thr_1", after_sequence=1042)
     assert subscription.resync_required is True
+
+
+@pytest.mark.asyncio
+async def test_same_thread_id_is_isolated_by_owner() -> None:
+    hub = EventHub(history_limit=3, subscriber_queue_limit=2)
+    await hub.publish(
+        "thr_shared",
+        event_type="test",
+        method="alice/event",
+        owner_id="alice",
+    )
+    await hub.publish(
+        "thr_shared",
+        event_type="test",
+        method="bob/event",
+        owner_id="bob",
+    )
+
+    alice = await hub.subscribe(
+        "thr_shared",
+        after_sequence=0,
+        owner_id="alice",
+    )
+    bob = await hub.subscribe(
+        "thr_shared",
+        after_sequence=0,
+        owner_id="bob",
+    )
+
+    assert [event.method for event in alice.initial_events] == ["alice/event"]
+    assert [event.method for event in bob.initial_events] == ["bob/event"]
+    assert await hub.subscriber_count(owner_id="alice") == 1
+    assert await hub.subscriber_count(owner_id="bob") == 1

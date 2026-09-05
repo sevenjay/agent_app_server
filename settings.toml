@@ -2,6 +2,12 @@
 app_name = "agent_app_server"
 log_level = "DEBUG"
 
+# Deployment mode: "single_user" keeps the existing header-free layout;
+# "multi_tenant" trusts identity headers injected by an upstream oauth2-proxy.
+deployment_mode = "single_user"
+oauth2_proxy_subject_header = "X-Forwarded-User"
+oauth2_proxy_username_header = "X-Forwarded-Preferred-Username"
+
 # Relative paths are resolved from the repository root.
 database_path = "../agent_app_server_data/app.db"
 database_echo = false
@@ -11,6 +17,9 @@ scheduler_timezone = "Asia/Taipei"
 scheduler_health_sample_seconds = 300
 
 codex_enabled = true
+# Empty uses the Python SDK's bundled CLI. Set an absolute path to use a
+# separately installed Codex that supports sessions created by newer versions.
+codex_bin = ""
 # Approval mode: "auto_review" automatically reviews elevated-permission
 # requests; "deny_all" rejects all such requests.
 codex_approval_mode = "auto_review"

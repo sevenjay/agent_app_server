@@ -59,7 +59,7 @@ export ENV_FOR_DYNACONF=production
 | `production` | `0.0.0.0:8080` | `localhost`、`127.0.0.1`、`192.168.50.234` | 繼承 `auto_review` / `workspace_write` |
 
 > [!WARNING]
-> `TrustedHostMiddleware` 只驗證 HTTP `Host` header，不提供使用者驗證。production 目前也不會自動切換成較保守的 Codex permissions。部署者必須在 `.secrets.toml` 覆寫合適的 bind、trusted hosts、approval mode 與 sandbox，並提供 authentication、TLS 或等價的受信任存取層。
+> `TrustedHostMiddleware` 只驗證 HTTP `Host` header。`multi_tenant` 只信任 oauth2-proxy headers，因此 backend 必須限制為 proxy 可連；`single_user` 則必須保持在受信任網路。production 不會自動切換成較保守的 Codex permissions。
 
 建議以 host-specific 值覆寫，例如：
 
@@ -90,6 +90,16 @@ codex_thread_lookup_page_limit = 50
 codex_journal_retention_days = 30
 ```
 
+### Deployment mode
+
+```toml
+deployment_mode = "single_user" # 或 "multi_tenant"
+oauth2_proxy_subject_header = "X-Forwarded-User"
+oauth2_proxy_username_header = "X-Forwarded-Preferred-Username"
+```
+
+`single_user` 維持 `<codex_projects_root>/<project>` 且不要求 headers。`multi_tenant` 使用 `<codex_projects_root>/<username>/<project>`，並以 oauth2-proxy identity 建立 tenant scope。完整部署方式見 [Keycloak、oauth2-proxy 與多租戶部署](multi-tenant.md)。
+
 Web Permissions 卡片會用 Codex CLI 對應名稱呈現權限：
 
 | 設定值 | Codex CLI 對照 | 行為 |
@@ -102,7 +112,7 @@ Web Permissions 卡片會用 Codex CLI 對應名稱呈現權限：
 
 ### Project Registry
 
-`codex_projects_root` 必須指向存在且可讀的目錄，建議一律使用絕對路徑。server 在 startup 時會展開 `~`、`resolve()` root，並將每個第一層實體目錄註冊成 Project；symbolic link 不會被納入。
+`codex_projects_root` 必須指向存在且可讀的目錄，建議一律使用絕對路徑。單用戶模式會將 root 的第一層實體目錄註冊成 Project；多租戶模式則先選擇 username 目錄，再將其中的第一層實體目錄註冊成 Project。symbolic link 不會被納入。
 
 ```toml
 codex_projects_root = "/home/you/codex-workspaces"
@@ -119,16 +129,38 @@ Files API 只接受 project-relative path，拒絕 absolute path、`..`、backsl
 
 應用程式沿用執行服務之 Linux user 的 `~/.codex`。它不接受、保存或記錄 Browser 提交的 Codex API key。部署時應使用專用 service account，並審核該帳號的 Project、network 與其他 filesystem permissions。
 
+### Codex CLI 版本與 Session 相容性
+
+`codex_bin` 預設為空字串，使用 Python SDK 內附的 CLI；更新 shell 中的 `codex` 不會更新這個內附版本。若 Session 由較新的 CLI 建立，舊 runtime 可能回覆 `paginated_threads is not supported yet`，造成選取 Session、preferences PATCH 或面板載入失敗。
+
+可在 `.secrets.toml` 指定已安裝的新版執行檔，並重啟服務：
+
+```toml
+[production]
+codex_bin = "/home/jack/.npm-global/bin/codex"
+```
+
+也可設定 `DYNACONF_CODEX_BIN`。systemd 的 PATH 可能不同於互動 shell，建議使用 `which codex` 顯示的絕對路徑；無效路徑會在啟動時明確報錯。啟動日誌會記錄使用內附或指定的執行檔。外部 CLI 的升級由管理者處理，需確認與目前 Python SDK 的 RPC 相容。
+
+選取 Session、載入面板與讀取 Goal 使用 `thread/read`，不先 resume 或取得 session 寫入鎖；即使另一個 Codex 程序正在使用該 Session，也可讀取已保存的內容。開始 Turn／Goal 等寫入操作仍須 resume。
+
 ## Database 與 migration
 
 預設 SQLite 位於 repository 外的 `../agent_app_server_data/app.db`。連線會啟用 WAL、foreign keys、5 秒 busy timeout 與 pool pre-ping。
 
 目前 schema：
 
-- `thread_ui_metadata`：project key、pin、custom label、last-opened 與 timestamps。
-- `app_settings`：最後選擇的 Project／Session 等少量 UI preferences。
+- `tenants`：external identity、username 與固定 workspace directory 的映射；不保存 credential 或 token。
+- `thread_ui_metadata`：以 tenant、thread 為 scope 的 project key、pin、custom label、last-opened 與 timestamps。
+- `app_settings`：以 tenant 為 scope 的 Project／Session 等少量 UI preferences。
 
 SQLite 不保存 prompt、agent response、command output、diff、Goal、token usage 或 Codex conversation mirror。
+
+升級到 tenant schema 時，既有 metadata 會歸入 `local-service-user`。從 tenant schema downgrade 只保留該 local owner 的 metadata，會捨棄其他 tenant mappings 與 UI metadata；執行 downgrade 前必須先備份 database。
+
+舊版啟動時使用 `create_all()` 建表，可能沒有 Alembic revision，或已建立 `tenants` 但 metadata 仍是舊 schema。`alembic upgrade head` 會驗證並接管這些已知 schema，再完成升級；不需要刪除 database 或手動 `stamp head`。若表結構不完整或不符合已知版本，migration 會停止，保留資料供檢查。啟動時若偵測到尚未升級的單用戶 schema，也會停止並提示 migration 指令，避免 API 在啟動後才回覆 HTTP 500。
+
+`single_user` 同樣需要 tenant schema，但仍使用 `local-service-user`，不要求登入或 proxy headers，也不改變既有 Project／Session 路徑。
 
 ## Stream Journal
 
@@ -141,9 +173,12 @@ SQLite online backup 不包含 `.stream_journal/`。若部署需要備份完整 
 Migration commands：
 
 ```bash
+poetry run python -m scripts.backup_database
 poetry run alembic upgrade head
 poetry run alembic current
 ```
+
+既有服務升級時先停止服務，完成上述備份與 migration 後再啟動。
 
 可用 `DATABASE_URL` 覆寫位置：
 

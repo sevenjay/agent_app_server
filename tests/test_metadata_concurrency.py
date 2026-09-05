@@ -6,6 +6,7 @@ from sqlalchemy import func, select
 from database import async_session
 from main import _touch_thread_metadata
 from models import ThreadUIMetadata
+from tenancy import LOCAL_TENANT_ID
 
 
 @pytest.mark.asyncio
@@ -17,7 +18,12 @@ async def test_parallel_fragment_touches_use_atomic_metadata_upsert() -> None:
 
     async def touch() -> None:
         async with async_session() as session:
-            await _touch_thread_metadata(session, thread, opened=True)
+            await _touch_thread_metadata(
+                session,
+                LOCAL_TENANT_ID,
+                thread,
+                opened=True,
+            )
 
     await asyncio.gather(touch(), touch(), touch())
 
@@ -25,9 +31,15 @@ async def test_parallel_fragment_touches_use_atomic_metadata_upsert() -> None:
         count = await session.scalar(
             select(func.count())
             .select_from(ThreadUIMetadata)
-            .where(ThreadUIMetadata.thread_id == thread["id"])
+            .where(
+                ThreadUIMetadata.tenant_id == LOCAL_TENANT_ID,
+                ThreadUIMetadata.thread_id == thread["id"],
+            )
         )
-        metadata = await session.get(ThreadUIMetadata, thread["id"])
+        metadata = await session.get(
+            ThreadUIMetadata,
+            (LOCAL_TENANT_ID, thread["id"]),
+        )
     assert count == 1
     assert metadata is not None
     assert metadata.project_key == "agent_app_server"

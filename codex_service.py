@@ -6,10 +6,11 @@ import asyncio
 import json
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from openai_codex import ApprovalMode, Sandbox
+from openai_codex import ApprovalMode, AsyncThread, Sandbox
 from openai_codex.errors import InvalidParamsError, InvalidRequestError
 from openai_codex.generated.v2_all import ThreadDeleteParams, ThreadDeleteResponse
 
@@ -31,7 +32,6 @@ from turn_manager import (
     TurnsUnavailableError,
 )
 from utility.log import LOGD, LOGW
-
 
 SESSION_TITLE_MODEL = "gpt-5.6-luna"
 SESSION_TITLE_REASONING_EFFORT = "low"
@@ -150,6 +150,8 @@ class CodexService:
         operation_timeout: float = 30,
         turn_idle_reconcile_seconds: float = 2,
         lookup_page_limit: int = 50,
+        tenant_id: str | None = None,
+        on_thread_authorized: Callable[[str], None] | None = None,
     ) -> None:
         self.codex = codex
         self.registry = registry
@@ -162,6 +164,8 @@ class CodexService:
         self.operation_timeout = operation_timeout
         self.turn_idle_reconcile_seconds = max(0.01, turn_idle_reconcile_seconds)
         self.lookup_page_limit = lookup_page_limit
+        self.tenant_id = tenant_id
+        self._on_thread_authorized = on_thread_authorized
         self._pending_threads: dict[str, _PendingThread] = {}
         self._thread_projects: dict[str, Project] = {}
         self._publish_lock = asyncio.Lock()
@@ -174,7 +178,10 @@ class CodexService:
     async def _fan_out_record(self, record: dict[str, Any]) -> EventEnvelope | None:
         thread_id = str(record["thread_id"])
         sequence = int(record["seq"])
-        if sequence <= await self.event_hub.current_sequence(thread_id):
+        if sequence <= await self.event_hub.current_sequence(
+            thread_id,
+            owner_id=self.tenant_id,
+        ):
             return None
         return await self.event_hub.publish(
             thread_id,
@@ -183,7 +190,13 @@ class CodexService:
             data=dict(record.get("data") or {}),
             turn_id=(str(record["turn_id"]) if record.get("turn_id") else None),
             sequence=sequence,
+            owner_id=self.tenant_id,
         )
+
+    def _register_thread_project(self, thread_id: str, project: Project) -> None:
+        self._thread_projects[thread_id] = project
+        if self._on_thread_authorized is not None:
+            self._on_thread_authorized(thread_id)
 
     async def _publish(
         self,
@@ -201,7 +214,7 @@ class CodexService:
             project = self._thread_projects.get(thread_id)
             if project is None:
                 project, _thread = await self._find_thread(thread_id)
-                self._thread_projects[thread_id] = project
+                self._register_thread_project(thread_id, project)
             opened = await self.stream_journal.ensure_opened(project.path, thread_id)
             if not opened.duplicate:
                 await self._fan_out_record(opened.record)
@@ -250,7 +263,10 @@ class CodexService:
         if turn_id is None:
             turn_id = str(data.get("turn_id") or data.get("turnId") or "") or None
         if turn_id is None:
-            active = await self.turn_manager.current(thread_id)
+            active = await self.turn_manager.current(
+                thread_id,
+                owner_id=self.tenant_id,
+            )
             turn_id = active.turn_id if active is not None else None
         published = await self._publish(
             thread_id,
@@ -325,7 +341,10 @@ class CodexService:
         *,
         error_code: str,
     ) -> bool:
-        current = await self.turn_manager.current(thread_id)
+        current = await self.turn_manager.current(
+            thread_id,
+            owner_id=self.tenant_id,
+        )
         if (
             current is None
             or current.kind != "turn"
@@ -350,7 +369,10 @@ class CodexService:
             if pump is not None and pump is not asyncio.current_task() and not pump.done():
                 pump.cancel()
                 await asyncio.gather(pump, return_exceptions=True)
-            latest = await self.turn_manager.current(thread_id)
+            latest = await self.turn_manager.current(
+                thread_id,
+                owner_id=self.tenant_id,
+            )
             if latest is not None and latest.turn_id == turn_id:
                 await self._publish(
                     thread_id,
@@ -358,7 +380,11 @@ class CodexService:
                     method="console.turn.idle",
                     turn_id=turn_id,
                 )
-                await self.turn_manager.finish(thread_id, turn_id=turn_id)
+                await self.turn_manager.finish(
+                    thread_id,
+                    turn_id=turn_id,
+                    owner_id=self.tenant_id,
+                )
         return True
 
     def _remember_pending_thread(
@@ -379,7 +405,7 @@ class CodexService:
             view=view,
             archived=bool(view.get("archived", False)),
         )
-        self._thread_projects[thread_id] = project
+        self._register_thread_project(thread_id, project)
         LOGD(f"codex_pending_thread_registered thread_id={thread_id} project_key={project.key}")
 
     def _refresh_pending_thread(
@@ -567,7 +593,7 @@ class CodexService:
         pending = self._pending_threads.get(thread_id)
         if pending is not None:
             LOGD(f"codex_thread_lookup_pending thread_id={thread_id} project_key={pending.project.key}")
-            self._thread_projects[thread_id] = pending.project
+            self._register_thread_project(thread_id, pending.project)
             return pending.project, pending.handle
 
         scanned_pages = 0
@@ -602,7 +628,7 @@ class CodexService:
                                 f"project_key={project.key} archived={archived} "
                                 f"page={page_number + 1} scanned_pages={scanned_pages}"
                             )
-                            self._thread_projects[thread_id] = project
+                            self._register_thread_project(thread_id, project)
                             return project, listed_thread
                     cursor = field(response, "next_cursor")
                     if not cursor:
@@ -615,6 +641,7 @@ class CodexService:
         thread_id: str,
         *,
         include_turns: bool,
+        resume: bool = True,
         model: str | None = None,
         reasoning_effort: str | None = None,
     ) -> tuple[Project, Any, Any]:
@@ -629,16 +656,21 @@ class CodexService:
                 project = pending.project
             else:
                 project, _listed = await self._find_thread(thread_id)
-            thread = await self._call(
-                self.codex.thread_resume(
-                    thread_id,
-                    approval_mode=self.approval_mode,
-                    sandbox=self.sandbox,
-                    model=model,
-                    config=({"model_reasoning_effort": reasoning_effort} if reasoning_effort is not None else None),
-                ),
-                operation="thread_resume",
-            )
+            if resume:
+                thread = await self._call(
+                    self.codex.thread_resume(
+                        thread_id,
+                        approval_mode=self.approval_mode,
+                        sandbox=self.sandbox,
+                        model=model,
+                        config=({"model_reasoning_effort": reasoning_effort} if reasoning_effort is not None else None),
+                    ),
+                    operation="thread_resume",
+                )
+            else:
+                # Reading saved history does not require taking over its writer.
+                # Another Codex process may already be running this session.
+                thread = AsyncThread(self.codex, thread_id)
         response = await self._read_thread_handle(
             thread,
             include_turns=include_turns,
@@ -654,7 +686,7 @@ class CodexService:
             handle=thread,
             view=self._read_view(response, project),
         )
-        self._thread_projects[thread_id] = project
+        self._register_thread_project(thread_id, project)
         LOGD(f"codex_thread_authorize_complete thread_id={thread_id} project_key={project.key} include_turns={include_turns}")
         return project, thread, response
 
@@ -890,7 +922,11 @@ class CodexService:
                 journal_diff = str(data.get("diff") or "")
             elif event.get("type") == "usage.updated":
                 journal_usage = dict(data)
-        await self.event_hub.advance_sequence(thread_id, journal.cursor)
+        await self.event_hub.advance_sequence(
+            thread_id,
+            journal.cursor,
+            owner_id=self.tenant_id,
+        )
         return {
             **history_view,
             "turns": turns,
@@ -905,6 +941,7 @@ class CodexService:
         project, _thread, response = await self._authorized_thread(
             thread_id,
             include_turns=include_turns,
+            resume=False,
         )
         view = self._read_view(response, project)
         if include_turns:
@@ -920,7 +957,11 @@ class CodexService:
         if project is None:
             project, _listed = await self._find_thread(thread_id)
         journal = await self.stream_journal.read(project.path, thread_id)
-        await self.event_hub.advance_sequence(thread_id, journal.cursor)
+        await self.event_hub.advance_sequence(
+            thread_id,
+            journal.cursor,
+            owner_id=self.tenant_id,
+        )
         return journal.cursor
 
     async def subscribe_events(
@@ -936,9 +977,14 @@ class CodexService:
         subscription = await self.event_hub.subscribe(
             thread_id,
             after_sequence=after_sequence,
+            owner_id=self.tenant_id,
         )
         journal = await self.stream_journal.read(project.path, thread_id)
-        await self.event_hub.advance_sequence(thread_id, journal.cursor)
+        await self.event_hub.advance_sequence(
+            thread_id,
+            journal.cursor,
+            owner_id=self.tenant_id,
+        )
         durable_replay = (
             [self._journal_envelope(event) for event in journal.events if int(event["seq"]) > after_sequence]
             if after_sequence is not None
@@ -946,7 +992,14 @@ class CodexService:
         )
         replay_by_sequence = {event.sequence: event for event in [*subscription.initial_events, *durable_replay]}
         replay = [replay_by_sequence[key] for key in sorted(replay_by_sequence)]
-        replay_boundary = journal.cursor if journal.exists else await self.event_hub.current_sequence(thread_id)
+        replay_boundary = (
+            journal.cursor
+            if journal.exists
+            else await self.event_hub.current_sequence(
+                thread_id,
+                owner_id=self.tenant_id,
+            )
+        )
         resync_required = bool(
             after_sequence is not None
             and (
@@ -981,7 +1034,10 @@ class CodexService:
 
     async def archive_thread(self, thread_id: str) -> dict[str, Any]:
         try:
-            await self.turn_manager.reserve_mutation(thread_id)
+            await self.turn_manager.reserve_mutation(
+                thread_id,
+                owner_id=self.tenant_id,
+            )
         except TurnConflictError as exc:
             raise ConsoleConflict from exc
         try:
@@ -1003,11 +1059,17 @@ class CodexService:
                 "archived": True,
             }
         finally:
-            await self.turn_manager.finish_mutation(thread_id)
+            await self.turn_manager.finish_mutation(
+                thread_id,
+                owner_id=self.tenant_id,
+            )
 
     async def delete_thread(self, thread_id: str) -> dict[str, Any]:
         try:
-            await self.turn_manager.reserve_mutation(thread_id)
+            await self.turn_manager.reserve_mutation(
+                thread_id,
+                owner_id=self.tenant_id,
+            )
         except TurnConflictError as exc:
             raise ConsoleConflict from exc
         try:
@@ -1052,7 +1114,10 @@ class CodexService:
                 "deleted": True,
             }
         finally:
-            await self.turn_manager.finish_mutation(thread_id)
+            await self.turn_manager.finish_mutation(
+                thread_id,
+                owner_id=self.tenant_id,
+            )
 
     async def _pending_thread_is_loaded(self, handle: Any) -> bool:
         """Return False only when Codex explicitly reports a missing handle."""
@@ -1117,7 +1182,10 @@ class CodexService:
 
     async def unarchive_thread(self, thread_id: str) -> dict[str, Any]:
         try:
-            await self.turn_manager.reserve_mutation(thread_id)
+            await self.turn_manager.reserve_mutation(
+                thread_id,
+                owner_id=self.tenant_id,
+            )
         except TurnConflictError as exc:
             raise ConsoleConflict from exc
         try:
@@ -1145,11 +1213,17 @@ class CodexService:
                 pending.view = {**pending.view, "archived": False}
             return view
         finally:
-            await self.turn_manager.finish_mutation(thread_id)
+            await self.turn_manager.finish_mutation(
+                thread_id,
+                owner_id=self.tenant_id,
+            )
 
     async def fork_thread(self, thread_id: str) -> dict[str, Any]:
         try:
-            await self.turn_manager.reserve_mutation(thread_id)
+            await self.turn_manager.reserve_mutation(
+                thread_id,
+                owner_id=self.tenant_id,
+            )
         except TurnConflictError as exc:
             raise ConsoleConflict from exc
         try:
@@ -1179,7 +1253,10 @@ class CodexService:
             )
             return view
         finally:
-            await self.turn_manager.finish_mutation(thread_id)
+            await self.turn_manager.finish_mutation(
+                thread_id,
+                owner_id=self.tenant_id,
+            )
 
     async def start_turn(
         self,
@@ -1194,6 +1271,7 @@ class CodexService:
                 thread_id,
                 model=model,
                 reasoning_effort=reasoning_effort,
+                owner_id=self.tenant_id,
             )
         except (TurnConflictError, TurnsUnavailableError) as exc:
             raise ConsoleConflict from exc
@@ -1240,6 +1318,7 @@ class CodexService:
                 thread_id,
                 turn_id=turn_id,
                 handle=handle,
+                owner_id=self.tenant_id,
             )
             user_item_id = f"console-user-{uuid.uuid4().hex}"
             await self._publish(
@@ -1259,7 +1338,11 @@ class CodexService:
                 self._pump_turn(thread_id, turn_id, handle),
                 name=f"codex-turn:{thread_id}:{turn_id}",
             )
-            await self.turn_manager.attach_task(thread_id, task)
+            await self.turn_manager.attach_task(
+                thread_id,
+                task,
+                owner_id=self.tenant_id,
+            )
             running_event = await self._publish(
                 thread_id,
                 event_type="console.turn.running",
@@ -1277,7 +1360,7 @@ class CodexService:
                 "journal_cursor": running_event.sequence if running_event else None,
             }
         except asyncio.CancelledError:
-            await self.turn_manager.finish(thread_id)
+            await self.turn_manager.finish(thread_id, owner_id=self.tenant_id)
             await self._publish(
                 thread_id,
                 event_type="console.turn.idle",
@@ -1285,7 +1368,7 @@ class CodexService:
             )
             raise
         except Exception:
-            await self.turn_manager.finish(thread_id)
+            await self.turn_manager.finish(thread_id, owner_id=self.tenant_id)
             await self._publish(
                 thread_id,
                 event_type="console.turn.error",
@@ -1304,7 +1387,7 @@ class CodexService:
         return view
 
     async def get_goal(self, thread_id: str) -> dict[str, Any] | None:
-        await self._authorized_thread(thread_id, include_turns=False)
+        await self._authorized_thread(thread_id, include_turns=False, resume=False)
         goal = await self._call(
             self.goal_adapter.get(thread_id),
             operation="thread_goal_get",
@@ -1326,6 +1409,7 @@ class CodexService:
                 kind="goal",
                 model=model,
                 reasoning_effort=reasoning_effort,
+                owner_id=self.tenant_id,
             )
         except (TurnConflictError, TurnsUnavailableError) as exc:
             raise ConsoleConflict from exc
@@ -1366,12 +1450,17 @@ class CodexService:
                 thread_id,
                 turn_id=turn_id,
                 handle=handle,
+                owner_id=self.tenant_id,
             )
             task = asyncio.create_task(
                 self._pump_goal(thread_id, turn_id, handle),
                 name=f"codex-goal:{thread_id}:{turn_id}",
             )
-            await self.turn_manager.attach_task(thread_id, task)
+            await self.turn_manager.attach_task(
+                thread_id,
+                task,
+                owner_id=self.tenant_id,
+            )
             await self._publish(
                 thread_id,
                 event_type="console.goal.running",
@@ -1392,7 +1481,7 @@ class CodexService:
                 "reasoning_effort": reasoning_effort,
             }
         except asyncio.CancelledError:
-            await self.turn_manager.finish(thread_id)
+            await self.turn_manager.finish(thread_id, owner_id=self.tenant_id)
             await self._publish(
                 thread_id,
                 event_type="console.goal.idle",
@@ -1400,7 +1489,7 @@ class CodexService:
             )
             raise
         except Exception:
-            await self.turn_manager.finish(thread_id)
+            await self.turn_manager.finish(thread_id, owner_id=self.tenant_id)
             await self._publish(
                 thread_id,
                 event_type="console.goal.error",
@@ -1422,6 +1511,7 @@ class CodexService:
                 kind="goal",
                 model=model,
                 reasoning_effort=reasoning_effort,
+                owner_id=self.tenant_id,
             )
         except (TurnConflictError, TurnsUnavailableError) as exc:
             raise ConsoleConflict from exc
@@ -1458,12 +1548,17 @@ class CodexService:
                 thread_id,
                 turn_id=turn_id,
                 handle=handle,
+                owner_id=self.tenant_id,
             )
             task = asyncio.create_task(
                 self._pump_goal(thread_id, turn_id, handle),
                 name=f"codex-goal:{thread_id}:{turn_id}",
             )
-            await self.turn_manager.attach_task(thread_id, task)
+            await self.turn_manager.attach_task(
+                thread_id,
+                task,
+                owner_id=self.tenant_id,
+            )
             await self._publish(
                 thread_id,
                 event_type="console.goal.running",
@@ -1484,7 +1579,7 @@ class CodexService:
                 "reasoning_effort": reasoning_effort,
             }
         except asyncio.CancelledError:
-            await self.turn_manager.finish(thread_id)
+            await self.turn_manager.finish(thread_id, owner_id=self.tenant_id)
             await self._publish(
                 thread_id,
                 event_type="console.goal.idle",
@@ -1492,7 +1587,7 @@ class CodexService:
             )
             raise
         except Exception:
-            await self.turn_manager.finish(thread_id)
+            await self.turn_manager.finish(thread_id, owner_id=self.tenant_id)
             await self._publish(
                 thread_id,
                 event_type="console.goal.error",
@@ -1503,7 +1598,10 @@ class CodexService:
 
     async def pause_goal(self, thread_id: str) -> dict[str, Any]:
         await self._authorized_thread(thread_id, include_turns=False)
-        active = await self.turn_manager.current(thread_id)
+        active = await self.turn_manager.current(
+            thread_id,
+            owner_id=self.tenant_id,
+        )
         reserved_mutation = False
         if active is not None and active.kind != "goal":
             raise ConsoleConflict
@@ -1512,12 +1610,18 @@ class CodexService:
                 if active.handle is None:
                     raise ConsoleConflict
                 await self._call(
-                    self.turn_manager.interrupt(thread_id),
+                    self.turn_manager.interrupt(
+                        thread_id,
+                        owner_id=self.tenant_id,
+                    ),
                     operation="thread_goal_pause",
                 )
             else:
                 try:
-                    await self.turn_manager.reserve_mutation(thread_id)
+                    await self.turn_manager.reserve_mutation(
+                        thread_id,
+                        owner_id=self.tenant_id,
+                    )
                 except TurnConflictError as exc:
                     raise ConsoleConflict from exc
                 reserved_mutation = True
@@ -1543,11 +1647,17 @@ class CodexService:
             return {"accepted": True, "thread_id": thread_id, "goal": goal}
         finally:
             if reserved_mutation:
-                await self.turn_manager.finish_mutation(thread_id)
+                await self.turn_manager.finish_mutation(
+                    thread_id,
+                    owner_id=self.tenant_id,
+                )
 
     async def clear_goal(self, thread_id: str) -> dict[str, Any]:
         await self._authorized_thread(thread_id, include_turns=False)
-        active = await self.turn_manager.current(thread_id)
+        active = await self.turn_manager.current(
+            thread_id,
+            owner_id=self.tenant_id,
+        )
         reserved_mutation = False
         if active is not None and active.kind != "goal":
             raise ConsoleConflict
@@ -1556,12 +1666,18 @@ class CodexService:
                 if active.handle is None:
                     raise ConsoleConflict
                 await self._call(
-                    self.turn_manager.interrupt(thread_id),
+                    self.turn_manager.interrupt(
+                        thread_id,
+                        owner_id=self.tenant_id,
+                    ),
                     operation="thread_goal_stop_before_clear",
                 )
             else:
                 try:
-                    await self.turn_manager.reserve_mutation(thread_id)
+                    await self.turn_manager.reserve_mutation(
+                        thread_id,
+                        owner_id=self.tenant_id,
+                    )
                 except TurnConflictError as exc:
                     raise ConsoleConflict from exc
                 reserved_mutation = True
@@ -1580,7 +1696,10 @@ class CodexService:
             return {"cleared": bool(cleared), "thread_id": thread_id}
         finally:
             if reserved_mutation:
-                await self.turn_manager.finish_mutation(thread_id)
+                await self.turn_manager.finish_mutation(
+                    thread_id,
+                    owner_id=self.tenant_id,
+                )
 
     async def _pump_goal(self, thread_id: str, turn_id: str, handle: Any) -> None:
         try:
@@ -1606,7 +1725,11 @@ class CodexService:
                 turn_id=turn_id,
             )
         finally:
-            await self.turn_manager.finish(thread_id, turn_id=turn_id)
+            await self.turn_manager.finish(
+                thread_id,
+                turn_id=turn_id,
+                owner_id=self.tenant_id,
+            )
             await self._publish(
                 thread_id,
                 event_type="console.goal.idle",
@@ -1638,7 +1761,11 @@ class CodexService:
                 turn_id=turn_id,
             )
         finally:
-            await self.turn_manager.finish(thread_id, turn_id=turn_id)
+            await self.turn_manager.finish(
+                thread_id,
+                turn_id=turn_id,
+                owner_id=self.tenant_id,
+            )
             await self._publish(
                 thread_id,
                 event_type="console.turn.idle",
@@ -1648,7 +1775,10 @@ class CodexService:
 
     async def steer_turn(self, thread_id: str, prompt: str) -> dict[str, Any]:
         try:
-            active = await self.turn_manager.active(thread_id)
+            active = await self.turn_manager.active(
+                thread_id,
+                owner_id=self.tenant_id,
+            )
             await self._call(
                 active.handle.steer(prompt),
                 operation="turn_steer",
@@ -1685,9 +1815,15 @@ class CodexService:
 
     async def interrupt_turn(self, thread_id: str) -> dict[str, Any]:
         try:
-            active = await self.turn_manager.active(thread_id)
+            active = await self.turn_manager.active(
+                thread_id,
+                owner_id=self.tenant_id,
+            )
             await self._call(
-                self.turn_manager.interrupt(thread_id),
+                self.turn_manager.interrupt(
+                    thread_id,
+                    owner_id=self.tenant_id,
+                ),
                 operation="turn_interrupt",
             )
         except TurnNotActiveError as exc:
@@ -1705,7 +1841,10 @@ class CodexService:
                     "reconciled": True,
                 }
             raise
-        current = await self.turn_manager.current(thread_id)
+        current = await self.turn_manager.current(
+            thread_id,
+            owner_id=self.tenant_id,
+        )
         if current is not None and current.turn_id == active.turn_id:
             await self._publish(
                 thread_id,

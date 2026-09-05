@@ -6,12 +6,14 @@ from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import Request
+from openai_codex.errors import InvalidRequestError
 
 import main
 from database import async_session
 from main import create_app
 from models import ThreadUIMetadata
 from projects import Project, ProjectRegistry
+from tenancy import LOCAL_TENANT_ID
 from tests.fakes import FakeCodex
 from tests.http_client import application_client
 
@@ -44,6 +46,21 @@ def fake_application():
     application.state.test_project_directory = project_directory
     application.state.test_project_path = project_path
     return application, fake
+
+
+@pytest.mark.asyncio
+async def test_session_selection_and_main_panels_do_not_take_writer_lock() -> None:
+    application, fake = fake_application()
+    fake.thread_resume = AsyncMock(
+        side_effect=InvalidRequestError(-32600, "thread thr_one already has an active writer"),
+    )
+    async with application_client(application) as client:
+        preferences = await client.patch("/api/preferences", json={"selected_thread_id": "thr_one"})
+        assert preferences.status_code == 200
+        for panel in ("timeline", "inspector", "composer"):
+            response = await client.get(f"/partials/threads/thr_one/{panel}")
+            assert response.status_code == 200
+    fake.thread_resume.assert_not_awaited()
 
 
 def test_recent_plan_history_keeps_the_latest_three_in_order() -> None:
@@ -118,6 +135,7 @@ async def test_status_api_and_static_shell_with_codex_disabled() -> None:
             "journal_mode": "wal",
         }
         assert payload["environment"] == "development"
+        assert payload["deployment_mode"] == "single_user"
         assert payload["version"] == main.APP_VERSION
         assert payload["scheduler"]["running"] is False
         assert payload["codex"]["enabled"] is False
@@ -246,7 +264,10 @@ async def test_account_models_projects_and_thread_crud() -> None:
         assert created_id not in refreshed.text
 
     async with async_session() as session:
-        assert await session.get(ThreadUIMetadata, created_id) is None
+        assert await session.get(
+            ThreadUIMetadata,
+            (LOCAL_TENANT_ID, created_id),
+        ) is None
 
 
 @pytest.mark.asyncio
@@ -849,6 +870,7 @@ def test_codex_and_partial_routes_use_web_user_dependency() -> None:
         for route in main.app.routes
         if getattr(route, "path", "").startswith("/api/codex/")
         or getattr(route, "path", "").startswith("/api/projects")
+        or getattr(route, "path", "").startswith("/api/preferences")
         or getattr(route, "path", "").startswith("/partials/")
     ]
     assert protected_routes
@@ -895,11 +917,13 @@ async def test_sse_response_headers_ready_event_and_cleanup() -> None:
         "thr_one",
         event_type="codex.notification",
         method="event/first",
+        owner_id=LOCAL_TENANT_ID,
     )
     second = await runtime.event_hub.publish(
         "thr_one",
         event_type="codex.notification",
         method="event/second",
+        owner_id=LOCAL_TENANT_ID,
     )
     request_with_query_cursor = Request(
         {

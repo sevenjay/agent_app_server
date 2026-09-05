@@ -209,7 +209,41 @@ async def test_thread_is_revalidated_after_resume(tmp_path: Path) -> None:
 
     service = make_service(MovingThreadFake(tmp_path), tmp_path)
     with pytest.raises(ConsoleNotFound):
+        await service.rename_thread("thr_one", "Renamed")
+
+
+@pytest.mark.asyncio
+async def test_reading_history_and_goal_does_not_resume_another_writer(tmp_path: Path) -> None:
+    class BusyThreadFake(FakeCodex):
+        async def thread_resume(self, thread_id: str, **kwargs):
+            raise InvalidRequestError(-32600, f"thread {thread_id} already has an active writer")
+
+    fake = BusyThreadFake(tmp_path)
+    service = make_service(fake, tmp_path)
+    thread = await service.read_thread("thr_one")
+    assert thread["name"] == "Existing thread"
+    assert thread["turns"]
+    assert await service.get_goal("thr_one") is None
+    assert fake.thread_resume_requests == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("changed_field", ["cwd", "id"])
+async def test_reading_saved_thread_revalidates_identity_and_project(
+    tmp_path: Path, changed_field: str,
+) -> None:
+    class ChangedThreadFake(FakeCodex):
+        async def thread_read(self, thread_id: str, *, include_turns: bool = False):
+            response = await super().thread_read(thread_id, include_turns=include_turns)
+            response.thread[changed_field] = "/tmp/outside" if changed_field == "cwd" else "another_thread"
+            return response
+
+    fake = ChangedThreadFake(tmp_path)
+    service = make_service(fake, tmp_path)
+    with pytest.raises(ConsoleNotFound):
         await service.read_thread("thr_one")
+    with pytest.raises(ConsoleNotFound):
+        await service.get_goal("thr_one")
 
 
 @pytest.mark.asyncio
@@ -817,7 +851,12 @@ async def test_interrupt_completion_race_is_reported_as_conflict(
         handle=fake.handles.setdefault("thr_one", object()),
     )
 
-    async def completed_before_interrupt(_thread_id: str) -> None:
+    async def completed_before_interrupt(
+        _thread_id: str,
+        *,
+        owner_id: str | None = None,
+    ) -> None:
+        del owner_id
         raise TurnNotActiveError
 
     service.turn_manager.interrupt = completed_before_interrupt  # type: ignore[method-assign]

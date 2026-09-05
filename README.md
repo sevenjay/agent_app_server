@@ -1,11 +1,11 @@
 # Agent App Server
 
-Agent App Server 是部署在固定 Linux 工作站上的單一使用者 Codex Web 控制台。使用者可以從桌面或手機瀏覽器管理 Project、Session 與工作區檔案，啟動 Codex Turn 或長時間 Goal，並即時查看訊息、工具輸出、plan、usage 與程式碼變更。
+Agent App Server 是部署在固定 Linux 工作站上的 Codex Web 控制台，可使用無登入單用戶模式，或由 Keycloak 與 oauth2-proxy 提供登入的 workspace-scoped 多租戶模式。使用者可以從桌面或手機瀏覽器管理 Project、Session 與工作區檔案，啟動 Codex Turn 或長時間 Goal，並即時查看訊息、工具輸出、plan、usage 與程式碼變更。
 
 Web console 觀察到的對話與執行軌跡會先寫入各 Project 的 per-thread Stream Journal；Codex history 在 Journal absent／partial 時提供 conversation fallback。SQLite 只保存 pin、label、最近開啟時間與最後選擇等 Web UI metadata。
 
 > [!WARNING]
-> 目前的 `require_web_user` 只是預留的整合接點，不是正式的使用者驗證。development 綁定 `127.0.0.1:8080`，但目前版本庫內的 production 設定會綁定 `0.0.0.0:8080`。在補上 authentication、TLS 與受信任的存取層，或改回 loopback 以前，請勿將服務直接公開到 Internet。
+> `single_user` 不驗證使用者；`multi_tenant` 信任 oauth2-proxy 注入的 headers，而不自行驗證 OIDC token。development 綁定 `127.0.0.1:8080`，但版本庫內的 production 設定會綁定 `0.0.0.0:8080`。多租戶部署必須禁止 Browser 繞過 oauth2-proxy 直接連線。
 
 ## Screenshot
 <p align="center">
@@ -24,6 +24,7 @@ Web console 觀察到的對話與執行軌跡會先寫入各 Project 的 per-thr
 ## 目前功能
 
 - **Projects**：從固定的 server-side root 探索或建立工作目錄，Browser 不需也不能提交任意 CWD。
+- **部署模式**：支援 header-free 單用戶模式，以及 Keycloak／oauth2-proxy 驗證、每個帳號獨立 workspace root 的多租戶模式。
 - **Sessions**：建立、重新命名、pin、fork、封存、解除封存與刪除既有 Codex Threads。
 - **即時執行**：啟動 Turn，透過 SSE 串流 agent 訊息、tool results、plan、diff 與 usage；活動中的 Turn 可 steer 或 interrupt。
 - **Long-running Goals**：可從 Inspector 或 composer `/goal` 指令啟動、查看、暫停、恢復與清除 Goal。
@@ -131,6 +132,7 @@ sudo journalctl -u agent-app-server.service -f
 ## 安全與資料邊界
 
 - Codex authentication 沿用服務帳號的 `~/.codex`；本應用不接受或保存 Browser 提交的 API key。
+- 多租戶模式只保存 external identity 與 workspace directory 的映射，不保存密碼、OIDC token、oauth2-proxy cookie 或登入 session。
 - Project 與 Files API 只接受 server registry 產生的 `project_key` 和 project-relative path，並拒絕 path traversal、absolute path 與 symbolic link。
 - Files 分頁可以實際覆寫或刪除工作區內容；部署時應以專用 Linux user 執行，並仔細限制該帳號的檔案權限。
 - SQLite 不保存 prompt、agent response、command output、diff、token usage 或 Codex conversation mirror；這些受保護內容由 Project 內權限為 `0700`／`0600` 的 `.stream_journal/` JSONL 保存。
@@ -162,6 +164,7 @@ npm run tw:build
 | [`docs/architecture.md`](docs/architecture.md) | 系統邊界、元件責任、資料權責、lifecycle 與單一 worker 限制 |
 | [`docs/flows.md`](docs/flows.md) | Project／Files／Thread 操作、Turn、Goal 與 SSE replay／resync 流程 |
 | [`docs/session-event-replay.md`](docs/session-event-replay.md) | Stream Journal snapshot cursor、durable replay、fallback 與 resync |
+| [`docs/multi-tenant.md`](docs/multi-tenant.md) | Keycloak client、oauth2-proxy、租戶目錄、切換模式與隔離限制 |
 
 ## 術語約定
 

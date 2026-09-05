@@ -138,6 +138,7 @@ class FakeCodex:
         unauthenticated: bool = False,
     ) -> None:
         self.project_path = str(Path(project_path).resolve())
+        self._client = SimpleNamespace(thread_read=self.thread_read)
         self.fail_start = fail_start
         self.unauthenticated = unauthenticated
         self.global_notifications: asyncio.Queue[FakeNotification] = asyncio.Queue()
@@ -355,6 +356,12 @@ class FakeCodex:
         self.threads[thread_id] = self._thread(thread_id, name="Untitled thread")
         self.threads[thread_id]["cwd"] = cwd
         return FakeThread(self, thread_id)
+
+    async def _ensure_initialized(self):
+        pass
+
+    async def thread_read(self, thread_id: str, *, include_turns: bool = False):
+        return await FakeThread(self, thread_id).read(include_turns=include_turns)
 
     async def thread_resume(self, thread_id: str, **kwargs):
         if thread_id not in self.threads:
