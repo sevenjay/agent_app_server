@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import codex_runtime
 from codex_runtime import (
     CodexRuntime,
     _discover_agents_md,
@@ -34,6 +35,34 @@ def registry() -> ProjectRegistry:
     return ProjectRegistry(
         [Project("agent_app_server", "Agent App Server", TEST_PROJECT_PATH)]
     )
+
+
+@pytest.mark.parametrize("configured", ["", "/opt/codex/bin/codex"])
+def test_runtime_uses_configured_cli_or_sdk_default(
+    monkeypatch: pytest.MonkeyPatch, configured: str,
+) -> None:
+    settings = runtime_settings()
+    settings.codex_bin = configured
+    configurations = []
+    monkeypatch.setattr(codex_runtime.shutil, "which", lambda value: value)
+    monkeypatch.setattr(
+        codex_runtime, "AsyncCodex", lambda **kwargs: configurations.append(kwargs) or object(),
+    )
+    runtime = CodexRuntime(settings_obj=settings, registry=registry())
+    runtime.client_factory()
+    if configured:
+        assert configurations[0]["config"].codex_bin == configured
+    else:
+        assert configurations == [{}]
+
+
+def test_runtime_rejects_missing_configured_cli(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = runtime_settings()
+    settings.codex_bin = "/missing/codex"
+    monkeypatch.setattr(codex_runtime.shutil, "which", lambda _value: None)
+    runtime = CodexRuntime(settings_obj=settings, registry=registry())
+    with pytest.raises(RuntimeError, match="Configured codex_bin is not executable or not found"):
+        runtime.client_factory()
 
 
 @pytest.mark.asyncio

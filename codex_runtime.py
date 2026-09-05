@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shutil
 import time
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -11,7 +12,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from openai_codex import ApprovalMode, AsyncCodex, Sandbox
+from openai_codex import ApprovalMode, AsyncCodex, CodexConfig, Sandbox
 from openai_codex.generated.v2_all import GetAccountRateLimitsResponse
 
 from codex_serializers import field, notification_view, to_primitive
@@ -203,13 +204,13 @@ class CodexRuntime:
         settings_obj: Any,
         registry: ProjectRegistry | None,
         initial_tenant_id: str | None = None,
-        client_factory: Callable[[], Any] = AsyncCodex,
+        client_factory: Callable[[], Any] | None = None,
         enabled: bool | None = None,
     ) -> None:
         self.settings = settings_obj
         self.registry = registry
         self.initial_tenant_id = initial_tenant_id
-        self.client_factory = client_factory
+        self.client_factory = client_factory or self._default_client
         self.enabled = (
             bool(getattr(settings_obj, "codex_enabled", True))
             if enabled is None
@@ -235,6 +236,17 @@ class CodexRuntime:
         self.account_label: str | None = None
         self.rate_limits: list[dict[str, Any]] = []
         self.rate_limits_sampled_at: datetime | None = None
+
+    def _default_client(self) -> AsyncCodex:
+        configured = str(getattr(self.settings, "codex_bin", "") or "").strip()
+        if not configured:
+            LOGI("Starting Codex with the SDK-bundled executable")
+            return AsyncCodex()
+        binary = shutil.which(str(Path(configured).expanduser()))
+        if binary is None:
+            raise RuntimeError(f"Configured codex_bin is not executable or not found: {configured}")
+        LOGI(f"Starting Codex with configured executable: {binary}")
+        return AsyncCodex(config=CodexConfig(codex_bin=binary))
 
     async def _operation(self, awaitable: Any, *, operation: str) -> Any:
         started_at = time.perf_counter()

@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import Request
+from openai_codex.errors import InvalidRequestError
 
 import main
 from database import async_session
@@ -45,6 +46,21 @@ def fake_application():
     application.state.test_project_directory = project_directory
     application.state.test_project_path = project_path
     return application, fake
+
+
+@pytest.mark.asyncio
+async def test_session_selection_and_main_panels_do_not_take_writer_lock() -> None:
+    application, fake = fake_application()
+    fake.thread_resume = AsyncMock(
+        side_effect=InvalidRequestError(-32600, "thread thr_one already has an active writer"),
+    )
+    async with application_client(application) as client:
+        preferences = await client.patch("/api/preferences", json={"selected_thread_id": "thr_one"})
+        assert preferences.status_code == 200
+        for panel in ("timeline", "inspector", "composer"):
+            response = await client.get(f"/partials/threads/thr_one/{panel}")
+            assert response.status_code == 200
+    fake.thread_resume.assert_not_awaited()
 
 
 def test_recent_plan_history_keeps_the_latest_three_in_order() -> None:

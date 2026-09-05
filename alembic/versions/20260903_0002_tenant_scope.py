@@ -10,6 +10,7 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 
 from alembic import op
+from database_schema import TENANT_REVISION, existing_schema_revision, validate_existing_tenants
 
 revision: str = "20260903_0002"
 down_revision: str | Sequence[str] | None = "20260731_0001"
@@ -57,7 +58,11 @@ def _tenant_metadata_tables() -> None:
     )
 
 
-def upgrade() -> None:
+def _create_tenants_table() -> None:
+    # Older startup code may already have created this table without upgrading
+    # the two metadata tables or recording an Alembic revision.
+    if not op.get_context().as_sql and validate_existing_tenants(op.get_bind()):
+        return
     op.create_table(
         "tenants",
         sa.Column("tenant_id", sa.String(length=64), nullable=False),
@@ -87,6 +92,11 @@ def upgrade() -> None:
         ),
     )
 
+
+def upgrade() -> None:
+    if not op.get_context().as_sql and existing_schema_revision(op.get_bind()) == TENANT_REVISION:
+        return
+    _create_tenants_table()
     _tenant_metadata_tables()
     op.execute(
         sa.text(

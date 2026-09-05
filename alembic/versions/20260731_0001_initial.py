@@ -10,6 +10,8 @@ from collections.abc import Sequence
 from alembic import op
 import sqlalchemy as sa
 
+from database_schema import existing_schema_revision
+
 
 revision: str = "20260731_0001"
 down_revision: str | Sequence[str] | None = None
@@ -18,6 +20,10 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    # Releases using create_all may have either schema without a version row.
+    # Validate it before letting Alembic record this baseline and continue.
+    if not op.get_context().as_sql and existing_schema_revision(op.get_bind()) is not None:
+        return
     op.create_table(
         "thread_ui_metadata",
         sa.Column("thread_id", sa.String(length=128), nullable=False),

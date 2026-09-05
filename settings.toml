@@ -17,6 +17,9 @@ scheduler_timezone = "Asia/Taipei"
 scheduler_health_sample_seconds = 300
 
 codex_enabled = true
+# Empty uses the Python SDK's bundled CLI. Set an absolute path to use a
+# separately installed Codex that supports sessions created by newer versions.
+codex_bin = ""
 # Approval mode: "auto_review" automatically reviews elevated-permission
 # requests; "deny_all" rejects all such requests.
 codex_approval_mode = "auto_review"

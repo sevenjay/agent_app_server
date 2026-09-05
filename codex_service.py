@@ -10,7 +10,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from openai_codex import ApprovalMode, Sandbox
+from openai_codex import ApprovalMode, AsyncThread, Sandbox
 from openai_codex.errors import InvalidParamsError, InvalidRequestError
 from openai_codex.generated.v2_all import ThreadDeleteParams, ThreadDeleteResponse
 
@@ -641,6 +641,7 @@ class CodexService:
         thread_id: str,
         *,
         include_turns: bool,
+        resume: bool = True,
         model: str | None = None,
         reasoning_effort: str | None = None,
     ) -> tuple[Project, Any, Any]:
@@ -655,16 +656,21 @@ class CodexService:
                 project = pending.project
             else:
                 project, _listed = await self._find_thread(thread_id)
-            thread = await self._call(
-                self.codex.thread_resume(
-                    thread_id,
-                    approval_mode=self.approval_mode,
-                    sandbox=self.sandbox,
-                    model=model,
-                    config=({"model_reasoning_effort": reasoning_effort} if reasoning_effort is not None else None),
-                ),
-                operation="thread_resume",
-            )
+            if resume:
+                thread = await self._call(
+                    self.codex.thread_resume(
+                        thread_id,
+                        approval_mode=self.approval_mode,
+                        sandbox=self.sandbox,
+                        model=model,
+                        config=({"model_reasoning_effort": reasoning_effort} if reasoning_effort is not None else None),
+                    ),
+                    operation="thread_resume",
+                )
+            else:
+                # Reading saved history does not require taking over its writer.
+                # Another Codex process may already be running this session.
+                thread = AsyncThread(self.codex, thread_id)
         response = await self._read_thread_handle(
             thread,
             include_turns=include_turns,
@@ -935,6 +941,7 @@ class CodexService:
         project, _thread, response = await self._authorized_thread(
             thread_id,
             include_turns=include_turns,
+            resume=False,
         )
         view = self._read_view(response, project)
         if include_turns:
@@ -1380,7 +1387,7 @@ class CodexService:
         return view
 
     async def get_goal(self, thread_id: str) -> dict[str, Any] | None:
-        await self._authorized_thread(thread_id, include_turns=False)
+        await self._authorized_thread(thread_id, include_turns=False, resume=False)
         goal = await self._call(
             self.goal_adapter.get(thread_id),
             operation="thread_goal_get",

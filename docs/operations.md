@@ -129,6 +129,21 @@ Files API 只接受 project-relative path，拒絕 absolute path、`..`、backsl
 
 應用程式沿用執行服務之 Linux user 的 `~/.codex`。它不接受、保存或記錄 Browser 提交的 Codex API key。部署時應使用專用 service account，並審核該帳號的 Project、network 與其他 filesystem permissions。
 
+### Codex CLI 版本與 Session 相容性
+
+`codex_bin` 預設為空字串，使用 Python SDK 內附的 CLI；更新 shell 中的 `codex` 不會更新這個內附版本。若 Session 由較新的 CLI 建立，舊 runtime 可能回覆 `paginated_threads is not supported yet`，造成選取 Session、preferences PATCH 或面板載入失敗。
+
+可在 `.secrets.toml` 指定已安裝的新版執行檔，並重啟服務：
+
+```toml
+[production]
+codex_bin = "/home/jack/.npm-global/bin/codex"
+```
+
+也可設定 `DYNACONF_CODEX_BIN`。systemd 的 PATH 可能不同於互動 shell，建議使用 `which codex` 顯示的絕對路徑；無效路徑會在啟動時明確報錯。啟動日誌會記錄使用內附或指定的執行檔。外部 CLI 的升級由管理者處理，需確認與目前 Python SDK 的 RPC 相容。
+
+選取 Session、載入面板與讀取 Goal 使用 `thread/read`，不先 resume 或取得 session 寫入鎖；即使另一個 Codex 程序正在使用該 Session，也可讀取已保存的內容。開始 Turn／Goal 等寫入操作仍須 resume。
+
 ## Database 與 migration
 
 預設 SQLite 位於 repository 外的 `../agent_app_server_data/app.db`。連線會啟用 WAL、foreign keys、5 秒 busy timeout 與 pool pre-ping。
@@ -143,6 +158,10 @@ SQLite 不保存 prompt、agent response、command output、diff、Goal、token 
 
 升級到 tenant schema 時，既有 metadata 會歸入 `local-service-user`。從 tenant schema downgrade 只保留該 local owner 的 metadata，會捨棄其他 tenant mappings 與 UI metadata；執行 downgrade 前必須先備份 database。
 
+舊版啟動時使用 `create_all()` 建表，可能沒有 Alembic revision，或已建立 `tenants` 但 metadata 仍是舊 schema。`alembic upgrade head` 會驗證並接管這些已知 schema，再完成升級；不需要刪除 database 或手動 `stamp head`。若表結構不完整或不符合已知版本，migration 會停止，保留資料供檢查。啟動時若偵測到尚未升級的單用戶 schema，也會停止並提示 migration 指令，避免 API 在啟動後才回覆 HTTP 500。
+
+`single_user` 同樣需要 tenant schema，但仍使用 `local-service-user`，不要求登入或 proxy headers，也不改變既有 Project／Session 路徑。
+
 ## Stream Journal
 
 每個有 Session 的 Project 會建立 `.stream_journal/<thread_id>/events.jsonl`。目錄與檔案權限分別固定為 `0700` 與 `0600`；Thread ID 在組合 path 前必須通過格式驗證。Journal 保存經 allowlist／redaction 的 user、agent、command、tool、file、web、plan 與 usage events，SSE sequence 直接沿用 JSONL `seq`。
@@ -154,9 +173,12 @@ SQLite online backup 不包含 `.stream_journal/`。若部署需要備份完整 
 Migration commands：
 
 ```bash
+poetry run python -m scripts.backup_database
 poetry run alembic upgrade head
 poetry run alembic current
 ```
+
+既有服務升級時先停止服務，完成上述備份與 migration 後再啟動。
 
 可用 `DATABASE_URL` 覆寫位置：
 
