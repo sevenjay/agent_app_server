@@ -20,6 +20,8 @@ codex_enabled = true
 # Empty uses the Python SDK's bundled CLI. Set an absolute path to use a
 # separately installed Codex that supports sessions created by newer versions.
 codex_bin = ""
+# Optional Node.js executable used by an external npm/NVM Codex launcher.
+node_bin = ""
 # Approval mode: "auto_review" automatically reviews elevated-permission
 # requests; "deny_all" rejects all such requests.
 codex_approval_mode = "auto_review"
@@ -40,7 +42,7 @@ codex_journal_retention_days = 30
 # Every real first-level directory is a Codex project. The Web console may
 # create a new project directory inside this root, but never accepts an
 # arbitrary path from the browser.
-codex_projects_root = "/home/jack/codex_workspaces"
+codex_projects_root = "/codex"
 # Project keys or directory names excluded from the Web project selector.
 codex_hidden_projects = ["agent_app_server_data"]
 
@@ -52,4 +54,4 @@ trusted_hosts = ["localhost", "127.0.0.1", "testserver"]
 [production]
 web_host = "0.0.0.0"
 web_port = 8080
-trusted_hosts = ["localhost", "127.0.0.1", "192.168.50.234"]
+trusted_hosts = ["localhost", "172.17.0.1", "192.168.201.44", "192.168.50.234"]

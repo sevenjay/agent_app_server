@@ -245,8 +245,32 @@ class CodexRuntime:
         binary = shutil.which(str(Path(configured).expanduser()))
         if binary is None:
             raise RuntimeError(f"Configured codex_bin is not executable or not found: {configured}")
+        configured_node = str(getattr(self.settings, "node_bin", "") or "").strip()
+        child_env = None
+        if configured_node:
+            node_binary = shutil.which(str(Path(configured_node).expanduser()))
+            if node_binary is None:
+                raise RuntimeError(
+                    f"Configured node_bin is not executable or not found: {configured_node}"
+                )
+            node_directory = str(Path(node_binary).parent)
+            inherited_path = os.environ.get("PATH", os.defpath)
+            path_entries = inherited_path.split(os.pathsep)
+            child_path = (
+                inherited_path
+                if node_directory in path_entries
+                else os.pathsep.join((node_directory, inherited_path))
+            )
+            child_env = {"PATH": child_path}
         LOGI(f"Starting Codex with configured executable: {binary}")
-        return AsyncCodex(config=CodexConfig(codex_bin=binary))
+        return AsyncCodex(
+            config=CodexConfig(
+                codex_bin=binary,
+                # npm/NVM launchers use ``#!/usr/bin/env node``. Only the
+                # explicitly configured Node directory needs to be inherited.
+                env=child_env,
+            )
+        )
 
     async def _operation(self, awaitable: Any, *, operation: str) -> Any:
         started_at = time.perf_counter()

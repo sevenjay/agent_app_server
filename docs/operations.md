@@ -137,10 +137,12 @@ Files API 只接受 project-relative path，拒絕 absolute path、`..`、backsl
 
 ```toml
 [production]
-codex_bin = "/home/jack/.npm-global/bin/codex"
+codex_bin = "/home/jack/.nvm/versions/node/v24.18.1/bin/codex"
+node_bin = "/home/jack/.nvm/versions/node/v24.18.1/bin/node"
 ```
-
-也可設定 `DYNACONF_CODEX_BIN`。systemd 的 PATH 可能不同於互動 shell，建議使用 `which codex` 顯示的絕對路徑；無效路徑會在啟動時明確報錯。啟動日誌會記錄使用內附或指定的執行檔。外部 CLI 的升級由管理者處理，需確認與目前 Python SDK 的 RPC 相容。
+預設值
+codex_bin	""	使用 Python SDK 隨附的內建 Codex 執行檔
+node_bin	""	不額外注入 Node 路徑至子程序，完全沿用系統現有 PATH
 
 選取 Session、載入面板與讀取 Goal 使用 `thread/read`，不先 resume 或取得 session 寫入鎖；即使另一個 Codex 程序正在使用該 Session，也可讀取已保存的內容。開始 Turn／Goal 等寫入操作仍須 resume。
 
