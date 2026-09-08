@@ -32,6 +32,8 @@ window.codexConsole = function codexConsole() {
 
   return {
     projectKey: "",
+    copiedProjectKey: "",
+    projectPathCopyTimer: null,
     threadId: "",
     appVersion: "",
     model: "",
@@ -463,11 +465,15 @@ window.codexConsole = function codexConsole() {
     },
 
     async selectProject(projectKey) {
-      if (this.projectKey === projectKey) return;
+      if (this.projectKey === projectKey) {
+        await this.copyProjectPath(projectKey);
+        return;
+      }
       if (this.fileOperationBusy) {
         this.showFileError(new Error("Wait for the current file operation to finish."));
         return;
       }
+      this.copiedProjectKey = "";
       this.projectKey = projectKey;
       this.resetProjectFiles(projectKey);
       this.threadId = "";
@@ -479,6 +485,57 @@ window.codexConsole = function codexConsole() {
         selected_thread_id: null,
       }).catch(() => {});
       await this.refreshThreads();
+    },
+
+    async copyProjectPath(projectKey) {
+      const projectButton = [...document.querySelectorAll(
+        "#project-selector [data-project-key]",
+      )].find((element) => element.dataset.projectKey === String(projectKey));
+      const projectPath = projectButton?.dataset.projectPath || "";
+      if (!projectPath) {
+        this.showError(new Error("The project path is unavailable."));
+        return;
+      }
+
+      try {
+        if (navigator.clipboard?.writeText) {
+          try {
+            await navigator.clipboard.writeText(projectPath);
+          } catch (_error) {
+            this.copyTextFallback(projectPath);
+          }
+        } else {
+          this.copyTextFallback(projectPath);
+        }
+      } catch (_error) {
+        this.showError(new Error("Could not copy the project path."));
+        return;
+      }
+
+      this.copiedProjectKey = projectKey;
+      window.clearTimeout(this.projectPathCopyTimer);
+      this.projectPathCopyTimer = window.setTimeout(() => {
+        if (this.copiedProjectKey === projectKey) this.copiedProjectKey = "";
+      }, 1500);
+    },
+
+    copyTextFallback(value) {
+      const previouslyFocused = document.activeElement;
+      const textarea = document.createElement("textarea");
+      textarea.value = value;
+      textarea.setAttribute("readonly", "");
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.append(textarea);
+      let copied = false;
+      try {
+        textarea.select();
+        copied = document.execCommand("copy");
+      } finally {
+        textarea.remove();
+        previouslyFocused?.focus({ preventScroll: true });
+      }
+      if (!copied) throw new Error("Copy command failed.");
     },
 
     async refreshProjects() {

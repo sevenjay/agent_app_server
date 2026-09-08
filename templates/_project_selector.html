@@ -3,11 +3,17 @@
     <button
       type="button"
       class="project-button"
+      data-project-key="{{ project.key }}"
+      data-project-path="{{ project.path }}"
       :class='{ "project-button-active": projectKey === {{ project.key|tojson }} }'
       @click='selectProject({{ project.key|tojson }})'
     >
       <span class="truncate text-sm font-medium text-slate-100">{{ project.name }}</span>
-      <span class="mt-1 truncate font-mono text-[10px] text-slate-500" title="{{ project.path }}">
+      <span
+        class="mt-1 truncate font-mono text-[10px] text-slate-500"
+        title="{{ project.path }}"
+        x-text='copiedProjectKey === {{ project.key|tojson }} ? "Path copied" : {{ project.path|tojson }}'
+      >
         {{ project.path }}
       </span>
     </button>

@@ -136,40 +136,23 @@
   </article>
   <article class="status-card">
     <div class="status-card-heading">
-      <p class="card-label">Account</p>
+      <p class="card-label">Account &amp; Limit</p>
       <button
         type="button"
         class="status-help"
-        aria-label="About account"
-        aria-describedby="account-help"
+        aria-label="About account and limits"
+        aria-describedby="account-and-limits-help"
       >
         <span aria-hidden="true">?</span>
-        <span id="account-help" class="status-tooltip" role="tooltip">
-          The Codex account identity and plan loaded when the shared runtime started.
+        <span id="account-and-limits-help" class="status-tooltip" role="tooltip">
+          The Codex account identity and plan are loaded when the shared runtime starts. Account limits are sampled at startup and periodically refreshed by the runtime health sampler.
         </span>
       </button>
     </div>
     <strong class="mt-2 block break-words">{{ status.codex.account_label or "Unavailable" }}</strong>
-    <p class="status-detail">Loaded at startup</p>
-  </article>
-  <article class="status-card">
-    <div class="status-card-heading">
-      <p class="card-label">Limit</p>
-      <button
-        type="button"
-        class="status-help"
-        aria-label="About account limits"
-        aria-describedby="account-limits-help"
-      >
-        <span aria-hidden="true">?</span>
-        <span id="account-limits-help" class="status-tooltip" role="tooltip">
-          Account limits are sampled at startup and periodically refreshed by the runtime health sampler.
-        </span>
-      </button>
-    </div>
     {% if status.codex.limits %}
       {% for limit in status.codex.limits %}
-        <div{% if not loop.first %} class="mt-3 border-t border-surface-700 pt-2"{% else %} class="mt-2"{% endif %}>
+        <div class="mt-3 border-t border-surface-700 pt-2">
           <div class="flex items-baseline justify-between gap-3">
             <strong>{{ limit.label }}</strong>
             <span class="whitespace-nowrap font-mono text-xs">{{ limit.remaining_percent }}% left</span>
@@ -182,7 +165,7 @@
         </div>
       {% endfor %}
     {% else %}
-      <strong class="mt-2 block">Unavailable</strong>
+      <strong class="mt-3 block border-t border-surface-700 pt-2">Unavailable</strong>
       <p class="status-detail">No account limit sample</p>
     {% endif %}
   </article>

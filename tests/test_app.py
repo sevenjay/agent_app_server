@@ -59,7 +59,7 @@ async def test_session_selection_and_main_panels_do_not_take_writer_lock() -> No
         assert "Codex 1.2.3-test" in runtime_status.text
         assert "Codex 1.2.3-test (Ubuntu 24.4.0; x86_64) unknown" in runtime_status.text
         assert 'aria-label="Full Codex version information"' in runtime_status.text
-        assert runtime_status.text.count('role="tooltip"') == 8
+        assert runtime_status.text.count('role="tooltip"') == 7
         preferences = await client.patch("/api/preferences", json={"selected_thread_id": "thr_one"})
         assert preferences.status_code == 200
         for panel in ("timeline", "inspector", "composer"):
@@ -160,17 +160,18 @@ async def test_status_api_and_static_shell_with_codex_disabled() -> None:
         assert "0 live connections" in runtime_status.text
         assert "Permissions" in runtime_status.text
         assert "Agents.md" in runtime_status.text
-        assert "Account" in runtime_status.text
-        assert "Limit" in runtime_status.text
+        assert 'class="card-label">Account &amp; Limit' in runtime_status.text
+        assert 'class="card-label">Account</p>' not in runtime_status.text
+        assert 'class="card-label">Limit</p>' not in runtime_status.text
         assert "Activity history" in runtime_status.text
         assert "activity records" in runtime_status.text
         assert "Bytes stored" in runtime_status.text
         assert "assistant updates" in runtime_status.text
         assert "Stream Journal" not in runtime_status.text
-        assert runtime_status.text.index('class="card-label">Limit') < runtime_status.text.index(
+        assert runtime_status.text.index('class="card-label">Account &amp; Limit') < runtime_status.text.index(
             'class="card-label">Activity history'
         )
-        assert runtime_status.text.count('role="tooltip"') == 7
+        assert runtime_status.text.count('role="tooltip"') == 6
 
         unavailable = await client.get("/api/codex/account")
         assert unavailable.status_code == 503
