@@ -55,6 +55,11 @@ async def test_session_selection_and_main_panels_do_not_take_writer_lock() -> No
         side_effect=InvalidRequestError(-32600, "thread thr_one already has an active writer"),
     )
     async with application_client(application) as client:
+        runtime_status = await client.get("/partials/codex/status")
+        assert "Codex 1.2.3-test" in runtime_status.text
+        assert "Codex 1.2.3-test (Ubuntu 24.4.0; x86_64) unknown" in runtime_status.text
+        assert 'aria-label="Full Codex version information"' in runtime_status.text
+        assert runtime_status.text.count('role="tooltip"') == 8
         preferences = await client.patch("/api/preferences", json={"selected_thread_id": "thr_one"})
         assert preferences.status_code == 200
         for panel in ("timeline", "inspector", "composer"):

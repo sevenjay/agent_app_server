@@ -139,7 +139,13 @@ class FakeCodex:
     ) -> None:
         self.project_path = str(Path(project_path).resolve())
         self.metadata = SimpleNamespace(
-            serverInfo=SimpleNamespace(name="codex", version="1.2.3-test")
+            serverInfo=SimpleNamespace(
+                name="codex",
+                version=(
+                    "1.2.3-test (Ubuntu 24.4.0; x86_64) unknown "
+                    "(codex_python_sdk; 0.144.4)"
+                ),
+            )
         )
         self._client = SimpleNamespace(thread_read=self.thread_read)
         self.fail_start = fail_start

@@ -25,7 +25,22 @@
     <p class="status-detail">
       {{ status.codex.active_turn_count }} turn{% if status.codex.active_turn_count != 1 %}s{% endif %} running across all sessions
     </p>
-    <p class="status-detail">Codex {{ status.codex.version or "version unavailable" }}</p>
+    <p class="status-detail status-version flex items-center gap-2">
+      Codex {{ status.codex.version_short or "version unavailable" }}
+      {% if status.codex.version %}
+        <button
+          type="button"
+          class="status-help"
+          aria-label="Full Codex version information"
+          aria-describedby="codex-version-help"
+        >
+          <span aria-hidden="true">i</span>
+          <span id="codex-version-help" class="status-tooltip" role="tooltip">
+            Codex {{ status.codex.version }}
+          </span>
+        </button>
+      {% endif %}
+    </p>
   </article>
   <article class="status-card">
     <div class="status-card-heading">

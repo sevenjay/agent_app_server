@@ -449,6 +449,7 @@
   .status-help:focus {
     border-color: var(--color-brand-400);
     color: var(--color-brand-400);
+    z-index: 100;
   }
 
   .status-tooltip {
@@ -474,7 +475,7 @@
     transition: opacity 120ms, transform 120ms, visibility 120ms;
     visibility: hidden;
     width: 14rem;
-    z-index: 30;
+    z-index: 100;
   }
 
   .status-help:hover .status-tooltip,
@@ -482,6 +483,22 @@
     opacity: 1;
     transform: translateY(0);
     visibility: visible;
+  }
+
+  /* Anchor the inline version tooltip to its row, inside the scroll panel. */
+  .status-version {
+    position: relative;
+  }
+
+  .status-version .status-help {
+    position: static;
+  }
+
+  .status-version .status-tooltip {
+    left: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    right: auto;
   }
 
   .message-user {

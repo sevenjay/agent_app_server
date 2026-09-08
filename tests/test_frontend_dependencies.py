@@ -95,6 +95,15 @@ def test_usage_panel_renders_structured_token_metrics() -> None:
     assert 'new Intl.NumberFormat("en-US"' in javascript
 
 
+def test_status_tooltips_render_above_following_status_cards() -> None:
+    tailwind = Path("static/src/input.css").read_text(encoding="utf-8")
+
+    hovered_help = tailwind.split(".status-help:hover,", 1)[1].split("}", 1)[0]
+    tooltip = tailwind.split(".status-tooltip {", 1)[1].split("}", 1)[0]
+    assert "z-index: 100;" in hovered_help
+    assert "z-index: 100;" in tooltip
+
+
 def test_timeline_live_debug_and_latest_changes_are_separate_tabs() -> None:
     html = Path("static/index.html").read_text(encoding="utf-8")
     javascript = Path("static/js/codex-console.js").read_text(encoding="utf-8")

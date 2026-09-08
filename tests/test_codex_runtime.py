@@ -75,6 +75,11 @@ async def test_runtime_starts_health_checks_and_closes_client() -> None:
     )
     await runtime.start()
     assert runtime.ready is True
+    assert runtime.codex_version == (
+        "1.2.3-test (Ubuntu 24.4.0; x86_64) unknown "
+        "(codex_python_sdk; 0.144.4)"
+    )
+    assert (await runtime.status())["version_short"] == "1.2.3-test"
     assert runtime.account_available is True
     assert runtime.account_label == "developer@example.com (Business)"
     assert runtime.agents_md[-1] == "AGENTS.md"

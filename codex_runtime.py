@@ -654,10 +654,14 @@ class CodexRuntime:
             getattr(self.settings, "codex_approval_mode", "auto_review")
         )
         sandbox = str(getattr(self.settings, "codex_sandbox", "workspace_write"))
+        version_short = (
+            self.codex_version.split(maxsplit=1)[0] if self.codex_version else None
+        )
         return {
             "enabled": self.enabled,
             "ready": self.ready,
             "version": self.codex_version,
+            "version_short": version_short,
             "account_available": self.account_available,
             "account_label": self.account_label,
             "agents_md": list(self.agents_md),
