@@ -784,6 +784,26 @@
     padding-left: 0.7rem;
   }
 
+  .mermaid-diagram {
+    margin-block: 0.75rem;
+    max-width: 100%;
+    overflow-x: auto;
+    border: 1px solid var(--color-surface-700);
+    border-radius: 4px;
+    padding: 0.55rem;
+  }
+
+  .mermaid-diagram iframe {
+    display: block;
+    width: 100%;
+    border: 0;
+  }
+
+  .mermaid-error {
+    color: var(--color-slate-400);
+    font-size: 0.75rem;
+  }
+
   .markdown-body hr {
     border-color: var(--color-surface-600);
   }

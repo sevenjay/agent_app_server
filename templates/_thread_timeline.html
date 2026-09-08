@@ -68,7 +68,7 @@
               <div
                 class="markdown-body"
                 data-markdown="{{ content.get("text", content.get("value", "")) }}"
-                x-html="renderMarkdown($el.dataset.markdown)"
+                x-markdown="{ text: $el.dataset.markdown }"
               ></div>
             {% endfor %}
           </article>
@@ -77,7 +77,7 @@
             <div
               class="markdown-body"
               data-markdown="{{ item.get("text", "") }}"
-              x-html="renderMarkdown($el.dataset.markdown)"
+              x-markdown="{ text: $el.dataset.markdown }"
             ></div>
           </article>
         {% elif item_type == "plan" %}
@@ -186,7 +186,7 @@
             <div
               class="markdown-body live-markdown"
               :class="{ 'streaming-markdown': item.kind === 'agent' && item.streaming }"
-              x-html="renderMarkdown(item.text)"
+              x-markdown="{ text: item.text, streaming: item.kind === 'agent' && item.streaming }"
             ></div>
           </article>
           <div

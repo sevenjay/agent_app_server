@@ -6,6 +6,7 @@ EXPECTED_CDN_DEFER = {
     "https://unpkg.com/marked@15.0.12/marked.min.js": False,
     "https://unpkg.com/dompurify@3.2.6/dist/purify.min.js": False,
     "https://unpkg.com/alpinejs@3.16.3/dist/cdn.min.js": True,
+    "https://unpkg.com/mermaid@11.12.0/dist/mermaid.min.js": True,
 }
 
 
@@ -251,7 +252,7 @@ def test_agent_message_deltas_stream_into_timeline() -> None:
     assert "this.liveTimelineItems[index].text += segment.delta;" in javascript
     assert "this.clearCompletedLiveMessages(completedTurnId);" in javascript
     assert 'x-for="item in liveTimelineItems"' in template
-    assert 'x-html="renderMarkdown(item.text)"' in template
+    assert 'x-markdown="{ text: item.text, streaming: item.kind === \'agent\' && item.streaming }"' in template
     assert 'x-show="!liveTimelineItems.length"' in template
     assert "streaming-indicator" in tailwind
     assert "streaming-markdown::after" in tailwind
