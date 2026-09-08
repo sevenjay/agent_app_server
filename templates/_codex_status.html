@@ -66,24 +66,6 @@
   </article>
   <article class="status-card">
     <div class="status-card-heading">
-      <p class="card-label">Database</p>
-      <button
-        type="button"
-        class="status-help"
-        aria-label="About database health"
-        aria-describedby="database-health-help"
-      >
-        <span aria-hidden="true">?</span>
-        <span id="database-health-help" class="status-tooltip" role="tooltip">
-          Service-wide database connectivity and the active SQLite journal mode.
-        </span>
-      </button>
-    </div>
-    <strong class="mt-2 block">{{ status.database.journal_mode|upper }}</strong>
-    <p class="status-detail">{{ "Connected" if status.database.connected else "Unavailable" }}</p>
-  </article>
-  <article class="status-card">
-    <div class="status-card-heading">
       <p class="card-label">Permissions</p>
       <button
         type="button"
@@ -132,7 +114,6 @@
     {% else %}
       <strong class="mt-2 block">&lt;none&gt;</strong>
     {% endif %}
-    <p class="status-detail">Loaded at startup</p>
   </article>
   <article class="status-card">
     <div class="status-card-heading">

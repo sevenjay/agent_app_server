@@ -59,7 +59,7 @@ async def test_session_selection_and_main_panels_do_not_take_writer_lock() -> No
         assert "Codex 1.2.3-test" in runtime_status.text
         assert "Codex 1.2.3-test (Ubuntu 24.4.0; x86_64) unknown" in runtime_status.text
         assert 'aria-label="Full Codex version information"' in runtime_status.text
-        assert runtime_status.text.count('role="tooltip"') == 7
+        assert runtime_status.text.count('role="tooltip"') == 6
         preferences = await client.patch("/api/preferences", json={"selected_thread_id": "thr_one"})
         assert preferences.status_code == 200
         for panel in ("timeline", "inspector", "composer"):
@@ -158,8 +158,11 @@ async def test_status_api_and_static_shell_with_codex_disabled() -> None:
         assert "0 turns running across all sessions" in runtime_status.text
         assert "Live updates" in runtime_status.text
         assert "0 live connections" in runtime_status.text
+        assert 'class="card-label">Database' not in runtime_status.text
+        assert "database-health-help" not in runtime_status.text
         assert "Permissions" in runtime_status.text
         assert "Agents.md" in runtime_status.text
+        assert "Loaded at startup" not in runtime_status.text
         assert 'class="card-label">Account &amp; Limit' in runtime_status.text
         assert 'class="card-label">Account</p>' not in runtime_status.text
         assert 'class="card-label">Limit</p>' not in runtime_status.text
@@ -171,7 +174,7 @@ async def test_status_api_and_static_shell_with_codex_disabled() -> None:
         assert runtime_status.text.index('class="card-label">Account &amp; Limit') < runtime_status.text.index(
             'class="card-label">Activity history'
         )
-        assert runtime_status.text.count('role="tooltip"') == 6
+        assert runtime_status.text.count('role="tooltip"') == 5
 
         unavailable = await client.get("/api/codex/account")
         assert unavailable.status_code == 503
