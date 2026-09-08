@@ -25,6 +25,7 @@
     <p class="status-detail">
       {{ status.codex.active_turn_count }} turn{% if status.codex.active_turn_count != 1 %}s{% endif %} running across all sessions
     </p>
+    <p class="status-detail">Codex {{ status.codex.version or "version unavailable" }}</p>
   </article>
   <article class="status-card">
     <div class="status-card-heading">

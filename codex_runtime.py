@@ -232,6 +232,7 @@ class CodexRuntime:
         self._health_sample_task: asyncio.Task[None] | None = None
         self.ready = False
         self.account_available = False
+        self.codex_version: str | None = None
         self.agents_md: list[str] = []
         self.account_label: str | None = None
         self.rate_limits: list[dict[str, Any]] = []
@@ -309,6 +310,7 @@ class CodexRuntime:
         await self.turn_manager.enable()
         self.ready = False
         self.account_available = False
+        self.codex_version = None
         self.agents_md = _discover_agents_md(Path.cwd())
         self.account_label = None
         self.rate_limits = []
@@ -324,6 +326,10 @@ class CodexRuntime:
                 client.__aenter__(),
                 operation="client_enter",
             )
+            metadata = getattr(client, "metadata", None)
+            server_info = field(metadata, "serverInfo")
+            version = field(server_info, "version")
+            self.codex_version = str(version).strip() if version else None
             account_response = await self._operation(
                 client.account(),
                 operation="account_health",
@@ -369,6 +375,7 @@ class CodexRuntime:
             self._thread_services.clear()
             self.ready = False
             self.account_available = False
+            self.codex_version = None
             self.account_label = None
             self.rate_limits = []
             self.rate_limits_sampled_at = None
@@ -398,6 +405,7 @@ class CodexRuntime:
         self.service = None
         self._services.clear()
         self._thread_services.clear()
+        self.codex_version = None
         self.account_label = None
         self.rate_limits = []
         self.rate_limits_sampled_at = None
@@ -649,6 +657,7 @@ class CodexRuntime:
         return {
             "enabled": self.enabled,
             "ready": self.ready,
+            "version": self.codex_version,
             "account_available": self.account_available,
             "account_label": self.account_label,
             "agents_md": list(self.agents_md),

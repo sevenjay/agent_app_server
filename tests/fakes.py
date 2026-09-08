@@ -138,6 +138,9 @@ class FakeCodex:
         unauthenticated: bool = False,
     ) -> None:
         self.project_path = str(Path(project_path).resolve())
+        self.metadata = SimpleNamespace(
+            serverInfo=SimpleNamespace(name="codex", version="1.2.3-test")
+        )
         self._client = SimpleNamespace(thread_read=self.thread_read)
         self.fail_start = fail_start
         self.unauthenticated = unauthenticated
