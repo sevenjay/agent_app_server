@@ -951,7 +951,7 @@
     line-height: 1.55;
     max-width: 100%;
     overflow: auto;
-    overscroll-behavior: contain;
+    overscroll-behavior-x: contain;
     padding: 0.3rem 0;
   }
 
