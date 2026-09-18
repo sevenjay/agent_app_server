@@ -147,7 +147,10 @@ class FakeCodex:
                 ),
             )
         )
-        self._client = SimpleNamespace(thread_read=self.thread_read)
+        self._client = SimpleNamespace(
+            request=self.request,
+            thread_read=self.thread_read,
+        )
         self.fail_start = fail_start
         self.unauthenticated = unauthenticated
         self.global_notifications: asyncio.Queue[FakeNotification] = asyncio.Queue()
@@ -174,8 +177,24 @@ class FakeCodex:
                     "remaining_percent": 75,
                     "resets_at": 1_785_883_680,
                 },
-            }
+            },
+            "rate_limit_reset_credits": {
+                "available_count": 1,
+                "credits": [
+                    {
+                        "id": "reset_one",
+                        "status": "available",
+                        "granted_at": 1_785_000_000,
+                        "expires_at": 1_800_000_000,
+                        "reset_type": "codexRateLimits",
+                        "title": "One-time Codex reset",
+                        "description": "Restores the eligible Codex usage limit.",
+                    }
+                ],
+            },
         }
+        self.reset_credit_outcome = "reset"
+        self.reset_credit_requests: list[dict[str, Any]] = []
         self.goals: dict[str, dict[str, Any]] = {}
         self.stream_error_threads: set[str] = set()
         self.threads: dict[str, dict[str, Any]] = {
@@ -279,6 +298,16 @@ class FakeCodex:
     async def rate_limits(self):
         self.rate_limit_requests += 1
         return deepcopy(self.rate_limits_response)
+
+    async def request(self, method, params, *, response_model):
+        if method != "account/rateLimitResetCredit/consume":
+            raise AssertionError(f"Unexpected fake RPC: {method}")
+        self.reset_credit_requests.append(deepcopy(params))
+        if self.reset_credit_outcome == "reset":
+            self.rate_limits_response["rate_limit_reset_credits"]["available_count"] = 0
+            self.rate_limits_response["rate_limit_reset_credits"]["credits"][0]["status"] = "redeemed"
+            self.rate_limits_response["rate_limits"]["primary"]["used_percent"] = 0
+        return response_model.model_validate({"outcome": self.reset_credit_outcome})
 
     async def next_notification(self) -> FakeNotification:
         return await self.global_notifications.get()

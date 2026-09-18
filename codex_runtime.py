@@ -6,6 +6,7 @@ import asyncio
 import os
 import shutil
 import time
+import uuid
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,10 +14,18 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from openai_codex import ApprovalMode, AsyncCodex, CodexConfig, Sandbox
-from openai_codex.generated.v2_all import GetAccountRateLimitsResponse
+from openai_codex.generated.v2_all import (
+    ConsumeAccountRateLimitResetCreditResponse,
+    GetAccountRateLimitsResponse,
+)
 
 from codex_serializers import field, notification_view, to_primitive
-from codex_service import CodexService, ConsoleNotFound, ConsoleUnavailable
+from codex_service import (
+    CodexService,
+    ConsoleBadRequest,
+    ConsoleNotFound,
+    ConsoleUnavailable,
+)
 from event_hub import EventHub
 from projects import ProjectRegistry
 from stream_journal import StreamJournal
@@ -174,6 +183,7 @@ def _rate_limit_rows(response: Any, *, timezone_name: str) -> list[dict[str, Any
         rows[label] = {
             "label": label,
             "remaining_percent": max(0, min(100, round(100 - used_percent))),
+            "reset_threshold_reached": 100 - used_percent <= 1,
             "resets_at": resets_at,
             "reset_label": reset_label,
         }
@@ -189,12 +199,69 @@ def _rate_limit_rows(response: Any, *, timezone_name: str) -> list[dict[str, Any
             rows["Monthly limit"] = {
                 "label": "Monthly limit",
                 "remaining_percent": max(0, min(100, round(remaining_percent))),
+                "reset_threshold_reached": remaining_percent <= 1,
                 "resets_at": resets_at,
                 "reset_label": reset_label,
             }
 
     order = {"Monthly limit": 0, "Weekly limit": 1}
     return sorted(rows.values(), key=lambda row: (order.get(row["label"], 2), row["label"]))
+
+
+def _reset_credit_summary(
+    response: Any,
+    *,
+    timezone_name: str,
+) -> dict[str, Any] | None:
+    data = to_primitive(response)
+    if not isinstance(data, dict):
+        return None
+    summary = _mapping_value(
+        data,
+        "rate_limit_reset_credits",
+        "rateLimitResetCredits",
+    )
+    if not isinstance(summary, dict):
+        return None
+
+    available_count = _mapping_value(summary, "available_count", "availableCount")
+    if not isinstance(available_count, int) or isinstance(available_count, bool):
+        available_count = 0
+
+    credits: list[dict[str, Any]] = []
+    raw_credits = summary.get("credits")
+    if isinstance(raw_credits, list):
+        for credit in raw_credits:
+            if not isinstance(credit, dict) or credit.get("status") != "available":
+                continue
+            expires_at, expires_label = _limit_reset(
+                _mapping_value(credit, "expires_at", "expiresAt"),
+                timezone_name=timezone_name,
+            )
+            credits.append(
+                {
+                    "id": str(credit.get("id") or ""),
+                    "title": credit.get("title"),
+                    "description": credit.get("description"),
+                    "expires_at": expires_at,
+                    "expires_label": expires_label,
+                }
+            )
+
+    credits.sort(key=lambda credit: (credit["expires_at"] is None, credit["expires_at"] or ""))
+    return {
+        "available_count": max(0, available_count),
+        "credits": credits,
+    }
+
+
+def _reset_credit_threshold_reached(rate_limits: list[dict[str, Any]]) -> bool:
+    eligible_labels = {"Weekly limit", "5h limit"}
+    return any(
+        row.get("label") in eligible_labels
+        and row.get("reset_threshold_reached") is True
+        for row in rate_limits
+    )
 
 
 class CodexRuntime:
@@ -230,12 +297,14 @@ class CodexRuntime:
         self._thread_services: dict[str, CodexService] = {}
         self._global_notification_task: asyncio.Task[None] | None = None
         self._health_sample_task: asyncio.Task[None] | None = None
+        self._rate_limit_reset_lock = asyncio.Lock()
         self.ready = False
         self.account_available = False
         self.codex_version: str | None = None
         self.agents_md: list[str] = []
         self.account_label: str | None = None
         self.rate_limits: list[dict[str, Any]] = []
+        self.rate_limit_reset_credits: dict[str, Any] | None = None
         self.rate_limits_sampled_at: datetime | None = None
 
     def _default_client(self) -> AsyncCodex:
@@ -314,6 +383,7 @@ class CodexRuntime:
         self.agents_md = _discover_agents_md(Path.cwd())
         self.account_label = None
         self.rate_limits = []
+        self.rate_limit_reset_credits = None
         self.rate_limits_sampled_at = None
         if not self.enabled:
             LOGW("Codex runtime is disabled by configuration")
@@ -378,6 +448,7 @@ class CodexRuntime:
             self.codex_version = None
             self.account_label = None
             self.rate_limits = []
+            self.rate_limit_reset_credits = None
             self.rate_limits_sampled_at = None
             raise
 
@@ -408,6 +479,7 @@ class CodexRuntime:
         self.codex_version = None
         self.account_label = None
         self.rate_limits = []
+        self.rate_limit_reset_credits = None
         self.rate_limits_sampled_at = None
         await self._stop_global_notification_pump()
         if client is not None:
@@ -458,7 +530,7 @@ class CodexRuntime:
             response_model=GetAccountRateLimitsResponse,
         )
 
-    async def _sample_rate_limits(self, client: Any) -> None:
+    async def _sample_rate_limits(self, client: Any, *, strict: bool = False) -> bool:
         try:
             response = await self._operation(
                 self._read_rate_limits(client),
@@ -468,13 +540,69 @@ class CodexRuntime:
             raise
         except Exception as exc:
             LOGW(f"Codex rate-limit health sample failed: {type(exc).__name__}")
-            return
-        self.rate_limits = _rate_limit_rows(
+            if strict:
+                raise ConsoleUnavailable from exc
+            return False
+        timezone_name = str(getattr(self.settings, "scheduler_timezone", "UTC"))
+        rate_limits = _rate_limit_rows(
             response,
-            timezone_name=str(getattr(self.settings, "scheduler_timezone", "UTC")),
+            timezone_name=timezone_name,
         )
+        reset_credits = _reset_credit_summary(
+            response,
+            timezone_name=timezone_name,
+        )
+        self.rate_limits = rate_limits
+        self.rate_limit_reset_credits = reset_credits
         self.rate_limits_sampled_at = datetime.now(timezone.utc)
         LOGD("Codex rate-limit health sample completed")
+        return True
+
+    async def refresh_rate_limits(self) -> None:
+        client = self.client
+        if not self.ready or client is None:
+            raise ConsoleUnavailable
+        await self._sample_rate_limits(client, strict=True)
+
+    async def _consume_rate_limit_reset_credit(self, client: Any) -> Any:
+        sdk_client = getattr(client, "_client", None)
+        request = getattr(sdk_client, "request", None)
+        if not callable(request):
+            raise RuntimeError("Codex client does not expose reset-credit consumption")
+        return await request(
+            "account/rateLimitResetCredit/consume",
+            {"idempotencyKey": str(uuid.uuid4())},
+            response_model=ConsumeAccountRateLimitResetCreditResponse,
+        )
+
+    async def consume_rate_limit_reset_credit(self) -> dict[str, str]:
+        async with self._rate_limit_reset_lock:
+            client = self.client
+            if not self.ready or client is None:
+                raise ConsoleUnavailable
+
+            await self._sample_rate_limits(client, strict=True)
+            if not _reset_credit_threshold_reached(self.rate_limits):
+                raise ConsoleBadRequest
+            if not self.rate_limit_reset_credits or self.rate_limit_reset_credits["available_count"] < 1:
+                return {"outcome": "noCredit"}
+
+            try:
+                response = await self._operation(
+                    self._consume_rate_limit_reset_credit(client),
+                    operation="rate_limit_reset_credit_consume",
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                LOGW(f"Codex reset-credit consumption failed: {type(exc).__name__}")
+                raise ConsoleUnavailable from exc
+
+            result = to_primitive(response)
+            outcome = result.get("outcome") if isinstance(result, dict) else None
+            if outcome not in {"reset", "nothingToReset", "noCredit", "alreadyRedeemed"}:
+                raise ConsoleUnavailable
+            return {"outcome": outcome}
 
     def _start_health_sample_loop(self, client: Any) -> None:
         self._health_sample_task = asyncio.create_task(
@@ -666,6 +794,21 @@ class CodexRuntime:
             "account_label": self.account_label,
             "agents_md": list(self.agents_md),
             "limits": [dict(limit) for limit in self.rate_limits],
+            "reset_credits": (
+                {
+                    "available_count": self.rate_limit_reset_credits["available_count"],
+                    "credits": [
+                        dict(credit)
+                        for credit in self.rate_limit_reset_credits["credits"]
+                    ],
+                }
+                if self.rate_limit_reset_credits is not None
+                else None
+            ),
+            "show_reset_credits": (
+                self.rate_limit_reset_credits is not None
+                and _reset_credit_threshold_reached(self.rate_limits)
+            ),
             "limits_sampled_at": (
                 self.rate_limits_sampled_at.isoformat()
                 if self.rate_limits_sampled_at

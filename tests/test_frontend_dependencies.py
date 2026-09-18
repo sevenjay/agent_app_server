@@ -105,6 +105,22 @@ def test_status_tooltips_render_above_following_status_cards() -> None:
     assert "z-index: 100;" in tooltip
 
 
+def test_low_limit_reset_credit_requires_confirmation_and_delayed_refresh() -> None:
+    html = Path("static/index.html").read_text(encoding="utf-8")
+    template = Path("templates/_codex_status.html").read_text(encoding="utf-8")
+    javascript = Path("static/js/codex-console.js").read_text(encoding="utf-8")
+
+    assert 'id="runtime-status"' in html
+    assert "status.codex.show_reset_credits" in template
+    assert "status.codex.reset_credits.available_count" in template
+    assert "credit.expires_label" in template
+    assert '@click="redeemRateLimitResetCredit()"' in template
+    assert 'window.confirm("Use one Codex reset credit now?")' in javascript
+    assert '"/api/codex/rate-limit-reset-credits/consume"' in javascript
+    assert "window.setTimeout(resolve, 5000)" in javascript
+    assert "await this.refreshRuntimeStatus(true);" in javascript
+
+
 def test_timeline_live_debug_and_latest_changes_are_separate_tabs() -> None:
     html = Path("static/index.html").read_text(encoding="utf-8")
     javascript = Path("static/js/codex-console.js").read_text(encoding="utf-8")

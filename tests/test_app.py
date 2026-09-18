@@ -182,6 +182,32 @@ async def test_status_api_and_static_shell_with_codex_disabled() -> None:
 
 
 @pytest.mark.asyncio
+async def test_low_limit_reset_credit_can_be_consumed_and_refreshed() -> None:
+    application, fake = fake_application()
+    fake.rate_limits_response["rate_limits"]["primary"]["used_percent"] = 99
+    async with application_client(application) as client:
+        low_limit = await client.get("/partials/codex/status")
+        assert "Weekly limit" in low_limit.text
+        assert "1% left" in low_limit.text
+        assert "Codex reset credits" in low_limit.text
+        assert "1 use available" in low_limit.text
+        assert "One-time Codex reset" in low_limit.text
+        assert "Expires" in low_limit.text
+        assert "Use reset" in low_limit.text
+
+        consumed = await client.post("/api/codex/rate-limit-reset-credits/consume")
+        assert consumed.status_code == 200
+        assert consumed.json() == {"outcome": "reset"}
+
+        refreshed = await client.get(
+            "/partials/codex/status",
+            params={"refresh_limits": "true"},
+        )
+        assert "100% left" in refreshed.text
+        assert "Codex reset credits" not in refreshed.text
+
+
+@pytest.mark.asyncio
 async def test_account_models_projects_and_thread_crud() -> None:
     application, fake = fake_application()
     async with application_client(application) as client:
@@ -195,6 +221,7 @@ async def test_account_models_projects_and_thread_crud() -> None:
         assert "75% left" in runtime_status.text
         assert "Weekly limit" in runtime_status.text
         assert "82% left" in runtime_status.text
+        assert "Codex reset credits" not in runtime_status.text
 
         projects = await client.get("/api/projects")
         assert projects.json() == {

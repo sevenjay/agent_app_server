@@ -94,6 +94,8 @@ window.codexConsole = function codexConsole() {
     fileOperationLabel: "",
     fileError: "",
     fileShowHidden: false,
+    resetCreditBusy: false,
+    resetCreditStatus: "",
 
     get connectionLabel() {
       return {
@@ -319,6 +321,49 @@ window.codexConsole = function codexConsole() {
         if (!String(error.message).includes("unavailable")) {
           throw error;
         }
+      }
+    },
+
+    async refreshRuntimeStatus(refreshLimits = false) {
+      const target = document.getElementById("runtime-status");
+      if (!target || !window.htmx) return;
+      const suffix = refreshLimits ? "?refresh_limits=true" : "";
+      await window.htmx.ajax("GET", `/partials/codex/status${suffix}`, {
+        target,
+        swap: "innerHTML",
+      });
+    },
+
+    async redeemRateLimitResetCredit() {
+      if (this.resetCreditBusy) return;
+      if (!window.confirm("Use one Codex reset credit now?")) return;
+
+      this.resetCreditBusy = true;
+      this.resetCreditStatus = "Using one reset credit…";
+      try {
+        const result = await this.api(
+          "/api/codex/rate-limit-reset-credits/consume",
+          { method: "POST" },
+        );
+        if (result.outcome !== "reset") {
+          const messages = {
+            nothingToReset: "Codex reports that there is currently nothing to reset.",
+            noCredit: "No Codex reset credit is currently available.",
+            alreadyRedeemed: "That Codex reset credit was already used.",
+          };
+          throw new Error(messages[result.outcome] || "The Codex reset was not applied.");
+        }
+
+        this.resetCreditStatus = "Reset applied. Refreshing limits in about 5 seconds…";
+        await new Promise((resolve) => window.setTimeout(resolve, 5000));
+        await this.refreshRuntimeStatus(true);
+        this.resetCreditStatus = "";
+      } catch (error) {
+        this.resetCreditStatus = "";
+        await this.refreshRuntimeStatus(false).catch(() => {});
+        this.showError(error);
+      } finally {
+        this.resetCreditBusy = false;
       }
     },
 

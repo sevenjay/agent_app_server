@@ -6,10 +6,13 @@ from types import SimpleNamespace
 import pytest
 
 import codex_runtime
+from codex_service import ConsoleBadRequest
 from codex_runtime import (
     CodexRuntime,
     _discover_agents_md,
     _rate_limit_rows,
+    _reset_credit_summary,
+    _reset_credit_threshold_reached,
 )
 from projects import Project, ProjectRegistry
 from tests.fakes import FakeCodex, FakeNotification
@@ -168,6 +171,100 @@ def test_rate_limit_rows_support_monthly_and_weekly_windows() -> None:
         ("Weekly limit", 79),
     ]
     assert rows[0]["resets_at"] == "2026-09-01T12:48:00+00:00"
+
+
+def test_reset_credit_snapshot_and_exact_threshold() -> None:
+    response = {
+        "rateLimits": {
+            "primary": {
+                "usedPercent": 99,
+                "windowDurationMins": 300,
+            },
+            "secondary": {
+                "usedPercent": 98.6,
+                "windowDurationMins": 10_080,
+            },
+        },
+        "rateLimitResetCredits": {
+            "availableCount": 2,
+            "credits": [
+                {
+                    "id": "redeemed",
+                    "status": "redeemed",
+                    "expiresAt": 1_800_000_100,
+                },
+                {
+                    "id": "available",
+                    "status": "available",
+                    "expiresAt": 1_800_000_000,
+                    "title": "Codex reset",
+                },
+            ],
+        },
+    }
+    rows = _rate_limit_rows(response, timezone_name="UTC")
+    summary = _reset_credit_summary(response, timezone_name="UTC")
+
+    assert [(row["label"], row["remaining_percent"]) for row in rows] == [
+        ("Weekly limit", 1),
+        ("5h limit", 1),
+    ]
+    assert rows[0]["reset_threshold_reached"] is False
+    assert rows[1]["reset_threshold_reached"] is True
+    assert _reset_credit_threshold_reached(rows) is True
+    assert summary == {
+        "available_count": 2,
+        "credits": [
+            {
+                "id": "available",
+                "title": "Codex reset",
+                "description": None,
+                "expires_at": "2027-01-15T08:00:00+00:00",
+                "expires_label": "08:00 on 15 Jan",
+            }
+        ],
+    }
+
+
+@pytest.mark.asyncio
+async def test_runtime_consumes_reset_credit_only_at_low_limit() -> None:
+    fake = FakeCodex(TEST_PROJECT_PATH)
+    fake.rate_limits_response["rate_limits"]["primary"]["used_percent"] = 99
+    runtime = CodexRuntime(
+        settings_obj=runtime_settings(),
+        registry=registry(),
+        client_factory=lambda: fake,
+    )
+    await runtime.start()
+    try:
+        status = await runtime.status()
+        assert status["show_reset_credits"] is True
+        assert status["reset_credits"]["available_count"] == 1
+
+        result = await runtime.consume_rate_limit_reset_credit()
+
+        assert result == {"outcome": "reset"}
+        assert len(fake.reset_credit_requests) == 1
+        assert fake.reset_credit_requests[0]["idempotencyKey"]
+    finally:
+        await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_runtime_rejects_reset_credit_when_relevant_limits_exceed_one_percent() -> None:
+    fake = FakeCodex(TEST_PROJECT_PATH)
+    runtime = CodexRuntime(
+        settings_obj=runtime_settings(),
+        registry=registry(),
+        client_factory=lambda: fake,
+    )
+    await runtime.start()
+    try:
+        with pytest.raises(ConsoleBadRequest):
+            await runtime.consume_rate_limit_reset_credit()
+        assert fake.reset_credit_requests == []
+    finally:
+        await runtime.close()
 
 
 @pytest.mark.asyncio

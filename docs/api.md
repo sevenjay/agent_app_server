@@ -12,6 +12,7 @@ Web UI 稱一段對話為 Session；API 與 Codex SDK 使用 Thread／`thread`�
 | `GET` | `/api/projects` | 列出可見 Projects |
 | `POST` | `/api/projects` | 在設定的 root 建立一個 Project 目錄 |
 | `GET` | `/api/codex/account` | Codex account 與 usage limits |
+| `POST` | `/api/codex/rate-limit-reset-credits/consume` | 在 5h 或 Weekly limit 剩餘不超過 1% 時使用一張 reset credit |
 | `GET` | `/api/codex/models` | 可用 models 與 reasoning efforts |
 | `GET` | `/api/preferences` | 讀取 Web UI preferences |
 | `PATCH` | `/api/preferences` | 更新最後選擇的 Project／Thread |
@@ -76,7 +77,7 @@ SSE 支援 `Last-Event-ID`、`after_sequence` query cursor、JSONL durable repla
 
 | Method | Path | 用途 |
 | --- | --- | --- |
-| `GET` | `/partials/codex/status` | Runtime、account、usage 與 model 狀態 |
+| `GET` | `/partials/codex/status` | Runtime、account、usage 與 model 狀態；`refresh_limits=true` 會立即重讀 account limits |
 | `GET` | `/partials/projects` | Project selector |
 | `GET` | `/partials/threads` | Session list，支援 archived 與 cursor |
 | `GET` | `/partials/threads/{thread_id}/timeline` | Journal Timeline snapshot，根元素帶 durable cursor／coverage |

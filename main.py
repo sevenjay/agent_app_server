@@ -625,6 +625,16 @@ def create_app(
     async def api_codex_account(request: Request) -> dict[str, Any]:
         return await _service(request).account()
 
+    @application.post(
+        "/api/codex/rate-limit-reset-credits/consume",
+        dependencies=[Depends(require_web_user)],
+    )
+    async def api_consume_rate_limit_reset_credit(
+        request: Request,
+    ) -> dict[str, str]:
+        runtime: CodexRuntime = request.app.state.codex_runtime
+        return await runtime.consume_rate_limit_reset_credit()
+
     @application.get(
         "/api/codex/models",
         dependencies=[Depends(require_web_user)],
@@ -1136,8 +1146,11 @@ def create_app(
     )
     async def codex_status_partial(
         request: Request,
+        refresh_limits: bool = False,
         session: AsyncSession = Depends(get_session),
     ):
+        if refresh_limits:
+            await request.app.state.codex_runtime.refresh_rate_limits()
         return templates.TemplateResponse(
             request,
             "_codex_status.html",
