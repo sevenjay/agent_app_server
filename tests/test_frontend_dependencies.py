@@ -1,6 +1,8 @@
 from html.parser import HTMLParser
 from pathlib import Path
 
+from jinja2 import Environment
+
 EXPECTED_CDN_DEFER = {
     "https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js": False,
     "https://unpkg.com/marked@15.0.12/marked.min.js": False,
@@ -162,7 +164,7 @@ def test_turn_details_show_model_start_time_and_duration() -> None:
     assert ".turn-tooltip-value" in tailwind
 
 
-def test_timeline_toolbar_toggles_all_collapsible_tool_cards() -> None:
+def test_timeline_toolbar_toggles_cards_and_blocks_independently() -> None:
     html = Path("static/index.html").read_text(encoding="utf-8")
     javascript = Path("static/js/codex-console.js").read_text(encoding="utf-8")
     tailwind = Path("static/src/input.css").read_text(encoding="utf-8")
@@ -178,10 +180,81 @@ def test_timeline_toolbar_toggles_all_collapsible_tool_cards() -> None:
     assert 'class="hidden sm:inline"' in html
     assert "collapsibleToolCardCount: 0" in javascript
     assert "allToolCardsExpanded: false" in javascript
+    assert "collapsibleToolBlockCount: 0" in javascript
+    assert "allToolBlocksExpanded: false" in javascript
     assert 'document.querySelectorAll("#timeline details.tool-card")' in javascript
-    assert "const expand = !cards.every((card) => card.open);" in javascript
+    assert 'document.querySelectorAll("#timeline details.tool-block")' in javascript
+    assert 'const expand = ![...cards, ...blocks].every((card) => card.open);' in javascript
     assert "card.open = expand;" in javascript
+    assert '@click="toggleToolBlocks()"' in html
+    assert "Expand block" in html
+    assert "(collapsibleToolCardCount > 0 || collapsibleToolBlockCount > 0)" in html
     assert ".tool-card-bulk-toggle" in tailwind
+
+
+def test_timeline_groups_adjacent_history_commands_without_reordering_messages() -> None:
+    template = Environment(autoescape=True).from_string(
+        Path("templates/_thread_timeline.html").read_text(encoding="utf-8")
+    )
+    html = template.render(
+        thread={
+            "id": "thread-1",
+            "turns": [{
+                "id": "turn-1",
+                "status": "completed",
+                "items": [
+                    {"type": "commandExecution", "command": "first", "status": "completed", "exit_code": 0},
+                    {"type": "commandExecution", "command": "second", "status": "completed", "exit_code": 1},
+                    {"type": "agentMessage", "text": "between"},
+                    {"type": "commandExecution", "command": "third", "status": "completed", "exit_code": 0},
+                ],
+            }],
+        },
+        active=None,
+    )
+
+    assert html.count('class="tool-block"') == 1
+    assert "2 Commands" in html
+    assert "1 completed · 1 failed" in html
+    assert html.index(">first</pre>") < html.index(">second</pre>")
+    assert html.index(">second</pre>") < html.index('data-markdown="between"')
+    assert html.index('data-markdown="between"') < html.index(">third</pre>")
+
+
+def test_history_file_groups_show_unique_files_before_the_total() -> None:
+    template = Environment(autoescape=True).from_string(
+        Path("templates/_thread_timeline.html").read_text(encoding="utf-8")
+    )
+    html = template.render(
+        thread={
+            "id": "thread-1",
+            "turns": [{
+                "id": "turn-1",
+                "status": "completed",
+                "items": [
+                    {"type": "fileChange", "changes": [{"path": "src/app.py"}, "styles\\input.css"]},
+                    {"type": "fileChange", "changes": ["src/app.py", "styles/input.css", "tests/app.py", "README.md"]},
+                    {"type": "agentMessage", "text": "between file groups"},
+                    {"type": "fileChange", "changes": []},
+                    {"type": "fileChange", "changes": []},
+                ],
+            }],
+        },
+        active=None,
+    )
+    history = html.split('<template x-for="block in liveTimelineBlocks"', 1)[0]
+
+    assert history.count('class="tool-block"') == 2
+    assert history.count("2 File changes") == 2
+    assert "4 files" in history
+    assert history.count('class="tool-block-file"') == 4
+    assert 'title="src/app.py">src/app.py</span>' in history
+    assert 'title="styles/input.css">input.css</span>' in history
+    assert 'title="tests/app.py">tests/app.py</span>' in history
+    assert 'title="README.md">README.md</span>' in history
+    assert history.index('title="README.md">README.md</span>') < history.index("4 files")
+    assert "Paths unavailable" in history
+    assert history.index("4 files") < history.index('data-markdown="between file groups"') < history.index("Paths unavailable")
 
 
 def test_files_tab_provides_lazy_tree_and_guarded_file_operations() -> None:
@@ -267,7 +340,8 @@ def test_agent_message_deltas_stream_into_timeline() -> None:
     assert "liveTimelineItems: []" in javascript
     assert "this.liveTimelineItems[index].text += segment.delta;" in javascript
     assert "this.clearCompletedLiveMessages(completedTurnId);" in javascript
-    assert 'x-for="item in liveTimelineItems"' in template
+    assert 'x-for="block in liveTimelineBlocks"' in template
+    assert 'x-for="item in block.items"' in template
     assert 'x-markdown="{ text: item.text, streaming: item.kind === \'agent\' && item.streaming }"' in template
     assert 'x-show="!liveTimelineItems.length"' in template
     assert "streaming-indicator" in tailwind
@@ -417,7 +491,7 @@ def test_tool_cards_except_file_changes_close_after_a_turn_ends() -> None:
     javascript = Path("static/js/codex-console.js").read_text(encoding="utf-8")
     tailwind = Path("static/src/input.css").read_text(encoding="utf-8")
 
-    history = template.split('<template x-for="item in liveTimelineItems"', 1)[0]
+    history = template.split('<template x-for="block in liveTimelineBlocks"', 1)[0]
     assert template.count('<article class="tool-card flex items-center justify-between gap-3">') == 2
     assert template.count('<span class="item-label mb-0 flex-none">File changes</span>') == 2
     assert template.count('<div class="flex min-w-0 items-center gap-3">') == 2
@@ -429,7 +503,7 @@ def test_tool_cards_except_file_changes_close_after_a_turn_ends() -> None:
     assert '<details class="tool-card overflow-hidden" open>' in template
     assert ".tool-card-summary" in tailwind
     assert ".tool-card[open] > .tool-card-summary" in tailwind
-    assert 'querySelectorAll("#timeline details.tool-card[open]")' in javascript
+    assert '#timeline details.tool-card[open], #timeline details.tool-block[open]' in javascript
     assert "card.open = false;" in javascript
     assert javascript.count("this.collapseToolCards();") == 3
 
