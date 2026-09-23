@@ -206,7 +206,26 @@
             </div>
             <button
               x-cloak
-              x-show="conversationTab === 'timeline' && collapsibleToolCardCount > 0"
+              x-show="conversationTab === 'timeline' && collapsibleToolBlockCount > 0"
+              class="tool-card-bulk-toggle"
+              type="button"
+              aria-controls="timeline"
+              :aria-label="allToolBlocksExpanded ? 'Collapse block' : 'Expand block'"
+              :aria-pressed="allToolBlocksExpanded"
+              :title="allToolBlocksExpanded ? 'Collapse block' : 'Expand block'"
+              @click="toggleToolBlocks()"
+            >
+              <svg x-show="!allToolBlocksExpanded" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                <path d="m7 8 5 5 5-5"></path>
+              </svg>
+              <svg x-show="allToolBlocksExpanded" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                <path d="m7 16 5-5 5 5"></path>
+              </svg>
+              <span class="hidden sm:inline" x-text="allToolBlocksExpanded ? 'Collapse block' : 'Expand block'"></span>
+            </button>
+            <button
+              x-cloak
+              x-show="conversationTab === 'timeline' && (collapsibleToolCardCount > 0 || collapsibleToolBlockCount > 0)"
               class="tool-card-bulk-toggle"
               type="button"
               aria-controls="timeline"

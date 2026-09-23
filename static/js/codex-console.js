@@ -55,6 +55,7 @@ window.codexConsole = function codexConsole() {
     lastEventSequences: Object.create(null),
     liveEvents: [],
     liveTimelineItems: [],
+    liveBlockOpen: {},
     livePlans: [],
     livePlanSnapshotCursor: null,
     terminalRefreshKeys: [],
@@ -75,6 +76,8 @@ window.codexConsole = function codexConsole() {
     sidebarOpen: localStorage.getItem("cc-sidebar-open") !== "0",
     collapsibleToolCardCount: 0,
     allToolCardsExpanded: false,
+    collapsibleToolBlockCount: 0,
+    allToolBlocksExpanded: false,
     eventCounter: 0,
     pendingLiveEvents: [],
     liveFlushScheduled: false,
@@ -103,6 +106,84 @@ window.codexConsole = function codexConsole() {
         reconnecting: "Live stream reconnecting",
         disconnected: "No session selected",
       }[this.connectionState] || "Live stream error";
+    },
+
+    get liveTimelineBlocks() {
+      const blocks = [];
+      for (const item of this.liveTimelineItems) {
+        const type = item.kind === "tool"
+          ? item.tool?.type || "tool"
+          : "";
+        const previous = blocks.at(-1);
+        if (type && previous?.type === type && previous.turnId === item.turnId) {
+          previous.items.push(item);
+          previous.grouped = true;
+        } else {
+          blocks.push({
+            key: item.key,
+            kind: item.kind,
+            type,
+            turnId: item.turnId,
+            items: [item],
+            grouped: false,
+          });
+        }
+      }
+      for (const block of blocks) {
+        if (block.type === "fileChange") block.files = this.toolBlockFiles(block);
+      }
+      return blocks;
+    },
+
+    toolBlockLabel(block) {
+      if (block.type === "fileChange") return `${block.items.length} File changes`;
+      if (block.type === "webSearch") return `${block.items.length} Web searches`;
+      const type = {
+        commandExecution: "Command",
+      }[block.type] || block.type;
+      return `${block.items.length} ${type}s`;
+    },
+
+    toolBlockFiles(block) {
+      const paths = [];
+      const seen = new Set();
+      for (const item of block.items) {
+        const changes = item.tool?.changes;
+        if (!Array.isArray(changes)) continue;
+        for (const change of changes) {
+          const value = typeof change === "string" ? change : change?.path;
+          if (typeof value !== "string" || !value) continue;
+          const path = value.replaceAll("\\", "/");
+          if (!seen.has(path)) {
+            seen.add(path);
+            paths.push(path);
+          }
+        }
+      }
+      const names = paths.map((path) => path.split("/").at(-1));
+      return {
+        count: paths.length,
+        entries: paths.map((path, index) => ({
+          path,
+          label: names.indexOf(names[index]) !== names.lastIndexOf(names[index]) ? path : names[index],
+        })),
+      };
+    },
+
+    toolBlockStatus(block) {
+      let completed = 0;
+      let failed = 0;
+      for (const item of block.items) {
+        const tool = item.tool || {};
+        const exitCode = tool.exit_code ?? tool.exitCode;
+        if (["failed", "error"].includes(tool.status) || tool.success === false ||
+            (exitCode != null && Number(exitCode) !== 0)) {
+          failed += 1;
+        } else if (tool.status === "completed" || tool.success === true) {
+          completed += 1;
+        }
+      }
+      return `${completed} completed · ${failed} failed`;
     },
 
     get currentModelId() {
@@ -1702,7 +1783,7 @@ window.codexConsole = function codexConsole() {
 
     collapseToolCards() {
       document
-        .querySelectorAll("#timeline details.tool-card[open]")
+        .querySelectorAll("#timeline details.tool-card[open], #timeline details.tool-block[open]")
         .forEach((card) => {
           card.open = false;
         });
@@ -1715,10 +1796,18 @@ window.codexConsole = function codexConsole() {
       );
     },
 
+    collapsibleToolBlocks() {
+      return Array.from(document.querySelectorAll("#timeline details.tool-block"));
+    },
+
     syncToolCardToggleState() {
       const cards = this.collapsibleToolCards();
+      const blocks = this.collapsibleToolBlocks();
       this.collapsibleToolCardCount = cards.length;
-      this.allToolCardsExpanded = cards.length > 0 && cards.every((card) => card.open);
+      this.collapsibleToolBlockCount = blocks.length;
+      this.allToolBlocksExpanded = blocks.length > 0 && blocks.every((block) => block.open);
+      this.allToolCardsExpanded = cards.length + blocks.length > 0 &&
+        [...cards, ...blocks].every((card) => card.open);
     },
 
     scheduleToolCardToggleStateSync() {
@@ -1730,13 +1819,23 @@ window.codexConsole = function codexConsole() {
 
     toggleToolCards() {
       const cards = this.collapsibleToolCards();
-      if (!cards.length) {
+      const blocks = this.collapsibleToolBlocks();
+      if (!cards.length && !blocks.length) {
         this.syncToolCardToggleState();
         return;
       }
-      const expand = !cards.every((card) => card.open);
-      cards.forEach((card) => {
+      const expand = ![...cards, ...blocks].every((card) => card.open);
+      [...cards, ...blocks].forEach((card) => {
         card.open = expand;
+      });
+      this.syncToolCardToggleState();
+    },
+
+    toggleToolBlocks() {
+      const blocks = this.collapsibleToolBlocks();
+      const expand = !blocks.every((block) => block.open);
+      blocks.forEach((block) => {
+        block.open = expand;
       });
       this.syncToolCardToggleState();
     },
@@ -1804,6 +1903,7 @@ window.codexConsole = function codexConsole() {
       this.pendingAgentMessageDeltas = [];
       this.pinTimelineAfterAgentFlush = false;
       this.liveTimelineItems = [];
+      this.liveBlockOpen = {};
       this.liveResponseSegment = 0;
       this.scheduleToolCardToggleStateSync();
     },
@@ -2363,6 +2463,8 @@ window.codexConsole = function codexConsole() {
       this.conversationTab = "timeline";
       this.collapsibleToolCardCount = 0;
       this.allToolCardsExpanded = false;
+      this.collapsibleToolBlockCount = 0;
+      this.allToolBlocksExpanded = false;
       this.liveEvents = [];
       this.pendingLiveEvents = [];
       this.resetLiveTimeline();
