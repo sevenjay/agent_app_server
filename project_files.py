@@ -99,6 +99,8 @@ def _relative_parts(value: str, *, allow_root: bool) -> tuple[str, ...]:
     ):
         raise InvalidFilePathError
     parts = tuple(value.split("/"))
+    if parts[0] == ".stream_journal":
+        raise InvalidFilePathError
     if any(
         not part
         or part in {".", ".."}
@@ -199,6 +201,8 @@ class ProjectFileManager:
         try:
             with os.scandir(directory) as iterator:
                 for directory_entry in iterator:
+                    if directory == self.root and directory_entry.name == ".stream_journal":
+                        continue
                     if not show_hidden and directory_entry.name.startswith("."):
                         continue
                     # Symbolic links and special files are deliberately not exposed in the
@@ -251,6 +255,8 @@ class ProjectFileManager:
     def create_directory(self, parent_path: str, name: str) -> dict[str, Any]:
         parent = self._directory(parent_path)
         target = parent / _validate_name(name)
+        if parent == self.root and target.name == ".stream_journal":
+            raise InvalidFilePathError
         try:
             target.mkdir(mode=0o755)
         except FileExistsError as exc:
@@ -273,6 +279,8 @@ class ProjectFileManager:
     ) -> dict[str, Any]:
         parent = self._directory(parent_path)
         target = parent / _validate_name(name)
+        if parent == self.root and target.name == ".stream_journal":
+            raise InvalidFilePathError
         try:
             existing = target.lstat()
         except FileNotFoundError:
@@ -332,6 +340,8 @@ class ProjectFileManager:
     def rename(self, relative_path: str, new_name: str) -> dict[str, Any]:
         source = self._existing_path(relative_path, allow_root=False)
         target = source.parent / _validate_name(new_name)
+        if source.parent == self.root and target.name == ".stream_journal":
+            raise InvalidFilePathError
         if target == source:
             return self._entry(source)
         try:

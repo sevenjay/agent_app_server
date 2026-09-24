@@ -20,6 +20,8 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.background import BackgroundTask
+from starlette.concurrency import run_in_threadpool
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from codex_runtime import CodexRuntime
@@ -32,6 +34,7 @@ from codex_service import (
     ConsoleServiceError,
 )
 from config import APP_VERSION, BASE_DIR, environment_settings, settings
+from conversation_attachments import ConversationAttachmentStore
 from database import database_status, dispose_engine, get_session, init_db
 from event_hub import EventEnvelope
 from models import AppSetting, ThreadUIMetadata
@@ -518,6 +521,61 @@ def create_app(
             raise ProjectNotFoundError from exc
         return ProjectFileManager(project)
 
+    def attachment_store(request: Request, project_key: str) -> ConversationAttachmentStore:
+        try:
+            return ConversationAttachmentStore(_web_user(request).registry.get(project_key))
+        except UnknownProjectError as exc:
+            raise ProjectNotFoundError from exc
+
+    @application.post(
+        "/api/projects/{project_key}/conversation-attachments",
+        status_code=status.HTTP_201_CREATED,
+        dependencies=[Depends(require_web_user)],
+    )
+    async def api_upload_conversation_attachment(
+        request: Request,
+        project_key: ProjectKey,
+        name: Annotated[str, Query(min_length=1, max_length=255)],
+    ) -> dict[str, Any]:
+        attachment = await attachment_store(request, project_key).upload(name, request.stream())
+        return attachment.public()
+
+    @application.delete(
+        "/api/projects/{project_key}/conversation-attachments/{attachment_id}",
+        status_code=status.HTTP_204_NO_CONTENT,
+        dependencies=[Depends(require_web_user)],
+    )
+    async def api_delete_conversation_attachment(request: Request, project_key: ProjectKey, attachment_id: str) -> Response:
+        await asyncio.to_thread(attachment_store(request, project_key).delete_pending, attachment_id)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    @application.get(
+        "/api/codex/threads/{thread_id}/attachments/{attachment_id}",
+        dependencies=[Depends(require_web_user)],
+    )
+    async def api_download_conversation_attachment(request: Request, thread_id: ThreadId, attachment_id: str) -> StreamingResponse:
+        from urllib.parse import quote
+
+        attachment, source = await _service(request).open_attachment(thread_id, attachment_id)
+
+        async def body():
+            try:
+                while chunk := await run_in_threadpool(source.read, 64 * 1024):
+                    yield chunk
+            finally:
+                source.close()
+
+        disposition = "inline" if attachment.metadata["mime"].startswith("image/") else "attachment"
+        return StreamingResponse(
+            body(), media_type=attachment.metadata["mime"], background=BackgroundTask(source.close),
+            headers={
+                "Content-Disposition": f"{disposition}; filename*=UTF-8''{quote(attachment.metadata['name'], safe='')}",
+                "Content-Length": str(attachment.metadata["size"]),
+                "X-Content-Type-Options": "nosniff",
+                "Cache-Control": "private, no-store",
+            },
+        )
+
     @application.get(
         "/api/projects/{project_key}/files",
         dependencies=[Depends(require_web_user)],
@@ -708,6 +766,7 @@ def create_app(
             await service.create_thread_from_prompt(
                 project_key=command.project_key,
                 prompt=command.initial_prompt,
+                attachment_ids=command.initial_attachment_ids,
                 model=command.model,
                 reasoning_effort=command.reasoning_effort,
             )
@@ -933,6 +992,7 @@ def create_app(
         return await _service(request).start_turn(
             thread_id,
             prompt=command.prompt,
+            attachment_ids=command.attachment_ids,
             model=command.model,
             reasoning_effort=command.reasoning_effort,
         )

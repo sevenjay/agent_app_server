@@ -26,7 +26,9 @@ from codex_service import (
     ConsoleNotFound,
     ConsoleUnavailable,
 )
+from conversation_attachments import ConversationAttachmentStore
 from event_hub import EventHub
+from project_files import ProjectFileError
 from projects import ProjectRegistry
 from stream_journal import StreamJournal
 from turn_manager import TurnManager
@@ -421,6 +423,8 @@ class CodexRuntime:
                         getattr(self.settings, "codex_journal_retention_days", 30)
                     ),
                 )
+                for project in self.registry:
+                    await asyncio.to_thread(ConversationAttachmentStore(project).prune_pending)
             await self._sample_rate_limits(client)
             self.ready = True
             self._start_global_notification_pump(client)
@@ -632,6 +636,12 @@ class CodexRuntime:
                 if not self.ready or self.client is not client:
                     return
                 await self._sample_rate_limits(client)
+                projects = {project.path: project for service in list(self._services.values()) for project in service.registry}
+                for project in projects.values():
+                    try:
+                        await asyncio.to_thread(ConversationAttachmentStore(project).prune_pending)
+                    except ProjectFileError as exc:
+                        LOGW(f"Attachment draft cleanup failed: project_key={project.key} code={exc.code}")
         except asyncio.CancelledError:
             raise
 

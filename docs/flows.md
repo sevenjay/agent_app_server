@@ -69,6 +69,22 @@ Directory listing 預設略過 Linux 慣例中以 `.` 開頭的隱藏項目；Fi
 
 ## 啟動與串流一個 Turn
 
+### 含附件的 Composer 草稿
+
+「＋」、桌面拖放與貼上圖片共用頂層 Alpine 的附件佇列；一般文字貼上維持 textarea 行為，輸入法組字中的 Enter 不會送出。HTMX 更新 composer 不重設佇列。附件綁定目前 Project／Thread 或新 Session 草稿，切換 scope 會釋放 `blob:` 預覽並清理 pending ID；不提供跨裝置草稿復原。
+
+1. 選檔時只保留瀏覽器 `File` 與縮圖，先檢查 5 檔／10 MiB／25 MiB 限制。
+2. 按送出後逐檔 raw-body 上傳，伺服器使用 `request.stream()` 寫入 `.stream_journal/.attachment-pending` 的暫存目錄，驗證後原子完成。上傳中不允許切換 scope 或修改此次草稿。
+3. 任一上傳失敗就停止，不提交部分訊息；保留文字與 File，重試時重用已成功的 pending ID。移除附件會 DELETE 該 pending ID。
+4. 全部上傳成功後重新確認 Thread 狀態，仍使用原定的新 Turn 路徑。若已變為 active，保留草稿並阻止送出；不改走 steer。`/goal` 與 active steer 含附件時也直接阻止。
+5. 新 Session 先產生標題並建立 Thread。後端保留 Turn 狀態、驗證 Project／pending IDs／實際總量，再將附件移入 `.stream_journal/<thread-id>/attachments/<id>`。
+6. 使用者原文透過 `TextInput`、圖片透過 `LocalImageInput` 傳給 SDK；文字檔只附路徑清單，不把日誌全文塞入 prompt。純文字請求繼續使用原本字串路徑。
+7. 手工 userMessage 與 SDK echo 合併成同一則 Timeline 訊息，Journal 保存附件 metadata。重載時檢查檔案是否仍存在，圖片透過授權 GET 顯示，遺失或 history fallback 的未知附件顯示不可用。
+
+成功才清除此次草稿；若確定 SDK 拒絕開始 Turn，恢復 pending IDs，新 Session 也刪除剛建立的 Thread。若結果不明則保留資料並阻止自動重送，讓使用者先重新開啟 Session 查看 history。已提交附件跟隨 Journal 的 30 天預設 retention；pending 由自己的 24 小時清理處理，Journal retention 明確略過 pending 根目錄與上傳中的檔案。
+
+### Turn 與 SSE
+
 Browser 先建立目前 Thread 的 SSE，收到 `console.stream.ready` 後才允許送出新 Turn。模型選單會使用 `model/list` 回傳的 `default_reasoning_effort` 與 `supported_reasoning_efforts`，只列出目前模型支援的 reasoning 等級；未明確選擇時沿用模型預設值，`max`／`ultra` 會提示較快消耗 usage limits。後端在單一 async lock 內先保留 `starting` 狀態，避免兩個同時送達的 request 都通過檢查。
 
 ```mermaid

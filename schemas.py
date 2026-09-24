@@ -11,6 +11,8 @@ ProjectFilePath = Annotated[str, Field(max_length=4096)]
 ProjectFileName = Annotated[str, Field(min_length=1, max_length=255)]
 ModelId = Annotated[str, Field(min_length=1, max_length=100)]
 Prompt = Annotated[str, Field(min_length=1, max_length=200_000)]
+AttachmentId = Annotated[str, Field(pattern=r"^[a-f0-9]{32}$")]
+AttachmentIds = Annotated[list[AttachmentId], Field(max_length=5)]
 ReasoningEffort = Literal[
     "none",
     "minimal",
@@ -64,6 +66,7 @@ class ThreadCreate(StrictRequest):
     name: Annotated[str, Field(min_length=1, max_length=200)] | None = None
     model: ModelId | None = None
     initial_prompt: Prompt | None = None
+    initial_attachment_ids: AttachmentIds = Field(default_factory=list)
     initial_goal: GoalObjective | None = None
     reasoning_effort: ReasoningEffort | None = None
 
@@ -79,6 +82,8 @@ class ThreadCreate(StrictRequest):
 
     @model_validator(mode="after")
     def validate_creation_mode(self) -> ThreadCreate:
+        if self.initial_attachment_ids and (not self.initial_prompt or not self.initial_prompt.strip()):
+            raise ValueError("initial_attachment_ids requires a non-blank initial_prompt")
         creation_modes = (
             self.name is not None,
             self.initial_prompt is not None,
@@ -122,6 +127,7 @@ class ThreadUpdate(StrictRequest):
 
 class TurnStart(StrictRequest):
     prompt: Prompt
+    attachment_ids: AttachmentIds = Field(default_factory=list)
     model: ModelId | None = None
     reasoning_effort: ReasoningEffort | None = None
 

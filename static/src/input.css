@@ -1,5 +1,25 @@
 @import "tailwindcss";
 
+@layer components {
+  .composer-attach, .attachment-remove {
+    @apply inline-flex shrink-0 items-center justify-center rounded-lg text-slate-300 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .composer-attach { @apply size-7 text-lg; }
+  .attachment-remove { @apply size-8 text-xl; }
+  .composer-drag-over .composer-surface { @apply outline-2 outline-sky-400; }
+  .attachment-list { @apply flex flex-wrap gap-2; }
+  .composer-attachments { @apply px-3 pt-3; }
+  .attachment-card { @apply flex min-w-0 max-w-full items-center gap-2 rounded-lg border border-slate-600 bg-slate-800/70 p-2; }
+  .attachment-link { @apply flex min-w-0 items-center gap-2 text-inherit no-underline hover:text-sky-300; }
+  .attachment-preview { @apply size-14 shrink-0 rounded object-cover; }
+  .attachment-details { @apply flex min-w-0 flex-col; }
+  .attachment-name { @apply max-w-56 truncate text-sm; }
+  .attachment-meta { @apply text-xs text-slate-400; }
+  .attachment-error { @apply max-w-56 text-xs text-red-300; }
+  .attachment-unavailable { @apply opacity-65; }
+  .message-user .attachment-list { @apply mt-2; }
+}
+
 @source "../../templates/**/*.html";
 @source "../index.html";
 @source "../js/**/*.js";
@@ -1622,7 +1642,7 @@
   .composer-toolbar {
     align-items: center;
     display: flex;
-    justify-content: flex-end;
+    justify-content: space-between;
     min-height: 1.9rem;
   }
 

@@ -16,6 +16,56 @@ from stream_journal import (
 )
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sdk_first", [False, True])
+async def test_mixed_attachment_metadata_dedup_and_identical_steer(tmp_path, sdk_first):
+    from conversation_attachments import REFERENCE_MARKER
+
+    journal = StreamJournal()
+    cards = [
+        {"id": "a" * 32, "name": "same.png", "mime": "image/png", "size": 100, "delivery": "vision", "path": "/private/image"},
+        {"id": "b" * 32, "name": "same.log", "mime": "text/plain", "size": 100, "delivery": "file_reference", "content": "private log"},
+    ]
+    manual = {"id": "manual", "type": "userMessage", "content": [{"type": "text", "text": "look"}], "attachments": cards}
+    sdk = {"id": "sdk", "type": "userMessage", "content": [
+        {"type": "text", "text": "look" + REFERENCE_MARKER + "/private/log\n[/Console attachment file references]"},
+        {"type": "image", "url": "data:image/png;base64,private image", "value": "not markdown"},
+    ]}
+    for item in ([sdk, manual] if sdk_first else [manual, sdk]):
+        await journal.append(tmp_path, "thread", event("thread", "codex.notification", "item/completed", {"item": item}, turn_id="turn"))
+    # A later text-only steer with identical wording must remain a separate message.
+    await journal.append(tmp_path, "thread", event("thread", "codex.notification", "item/completed", {
+        "item": {"id": "steer", "type": "userMessage", "content": [{"type": "text", "text": "look"}]},
+    }, turn_id="turn"))
+    turns, _ = materialize_timeline("thread", await journal.read(tmp_path, "thread"))
+    assert len(turns[0]["items"]) == 2
+    first = turns[0]["items"][0]
+    assert first["content"] == [{"type": "text", "text": "look"}]
+    assert len(first["attachments"]) == 2
+    assert first["attachments_unavailable"] is False
+    persisted = (tmp_path / ".stream_journal/thread/events.jsonl").read_text()
+    assert "/private/" not in persisted and "private log" not in persisted and "base64" not in persisted
+    assert "not markdown" not in persisted
+
+
+@pytest.mark.asyncio
+async def test_history_fallback_unknown_images_and_log_references_unavailable(tmp_path):
+    from conversation_attachments import REFERENCE_MARKER
+
+    journal = StreamJournal()
+    await journal.append_history(tmp_path, "thread", {"turns": [{"id": "turn", "status": "completed", "items": [{
+        "id": "sdk", "type": "userMessage", "content": [
+            {"type": "text", "text": "look" + REFERENCE_MARKER + "/private/log\n[/Console attachment file references]"},
+            {"type": "localImage", "path": "/private/image", "value": "bad markdown"},
+        ],
+    }]}]})
+    turns, _ = materialize_timeline("thread", await journal.read(tmp_path, "thread"))
+    item = turns[0]["items"][0]
+    assert item["content"] == [{"type": "text", "text": "look"}]
+    assert item["attachments"] == []
+    assert item["attachments_unavailable"] is True
+
+
 def event(
     thread_id: str,
     event_type: str,

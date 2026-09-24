@@ -1,0 +1,22 @@
+{% macro attachment_cards(expression) %}
+<div class="attachment-list" x-show="({{ expression }}).length">
+  <template x-for="attachment in {{ expression }}" :key="attachment.id">
+    <div class="attachment-card" :class="{ 'attachment-unavailable': attachment.available === false }">
+      <template x-if="attachment.available !== false && !attachment.pending">
+        <a class="attachment-link" :href="attachmentUrl(attachment)" target="_blank" rel="noopener">
+          <template x-if="attachment.mime.startsWith('image/')">
+            <img class="attachment-preview" :src="attachmentUrl(attachment)" :alt="attachment.name" loading="lazy"
+              @error="attachment.available = false">
+          </template>
+          <span class="attachment-details"><span class="attachment-name" x-text="attachment.name"></span>
+            <span class="attachment-meta" x-text="attachmentSize(attachment.size)"></span></span>
+        </a>
+      </template>
+      <template x-if="attachment.available === false || attachment.pending">
+        <span class="attachment-details"><span class="attachment-name" x-text="attachment.name"></span>
+          <span class="attachment-meta" x-text="attachment.pending ? 'Sending…' : 'Attachment unavailable'"></span></span>
+      </template>
+    </div>
+  </template>
+</div>
+{% endmacro %}

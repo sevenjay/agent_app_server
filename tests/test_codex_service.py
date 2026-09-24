@@ -19,9 +19,11 @@ from codex_service import (
     ConsoleTimeout,
     ConsoleUnavailable,
 )
+from conversation_attachments import ConversationAttachmentStore
 from event_hub import EventHub
 from projects import Project, ProjectRegistry
 from tests.fakes import FakeCodex, FakeGoalHandle, FakeThread
+from tests.test_conversation_attachments import chunks, png_bytes
 from turn_manager import TurnManager, TurnNotActiveError
 
 
@@ -37,6 +39,127 @@ def make_service(fake: FakeCodex, project_path: Path) -> CodexService:
         sandbox=Sandbox.workspace_write,
         operation_timeout=1,
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("new_session", [True, False])
+async def test_attachment_input_and_persistent_cards_with_sdk_echo(tmp_path, new_session, monkeypatch):
+    from openai_codex import LocalImageInput, TextInput
+
+    from stream_journal import StreamJournal
+
+    fake = FakeCodex(tmp_path)
+    service = make_service(fake, tmp_path)
+    monkeypatch.setattr(service, "_generate_session_title", AsyncMock(return_value="Attachments"))
+    store = ConversationAttachmentStore(service.registry.get("agent_app_server"))
+    image = await store.upload("same.png", chunks(png_bytes()))
+    log = await store.upload("same.log", chunks(b"LOG_ONLY_IDENTIFIER"))
+    ids = [image.metadata["id"], log.metadata["id"]]
+    kwargs = {"prompt": "Inspect these", "model": None, "reasoning_effort": None, "attachment_ids": ids}
+    if new_session:
+        result = await service.create_thread_from_prompt(project_key="agent_app_server", **kwargs)
+    else:
+        result = await service.start_turn("thr_one", **kwargs)
+    thread_id, turn_id = result["thread_id"], result["turn_id"]
+    sdk_input = fake.turn_requests[-1][1]
+    assert isinstance(sdk_input[0], TextInput)
+    assert isinstance(sdk_input[1], LocalImageInput)
+    assert "LOG_ONLY_IDENTIFIER" not in sdk_input[0].text
+    assert str(store.submitted(thread_id, ids[1]).path) in sdk_input[0].text
+    assert sdk_input[1].path == str(store.submitted(thread_id, ids[0]).path)
+    echo = {"id": "sdk-user", "type": "userMessage", "content": [
+        {"type": "text", "text": sdk_input[0].text}, {"type": "image", "url": "data:image/png;base64,PRIVATE"},
+    ]}
+    await service.publish_notification(thread_id, method="item/completed", data={"item": echo}, turn_id=turn_id)
+    fake.threads[thread_id]["turns"] = [{"id": turn_id, "status": "completed", "items": [echo]}]
+    await service.interrupt_turn(thread_id)
+    await service.turn_manager.shutdown(timeout=1)
+    service.stream_journal = StreamJournal()  # Simulate reopening durable history.
+    view = await service.read_thread(thread_id)
+    turn = next(turn for turn in view["turns"] if turn["id"] == turn_id)
+    users = [item for item in turn["items"] if item["type"] == "userMessage"]
+    assert len(users) == 1
+    assert users[0]["content"] == [{"type": "text", "text": "Inspect these"}]
+    assert [card["id"] for card in users[0]["attachments"]] == ids
+    assert all(card["available"] for card in users[0]["attachments"])
+    journal = (tmp_path / ".stream_journal" / thread_id / "events.jsonl").read_text()
+    assert "PRIVATE" not in journal and "payload.log" not in journal
+    store.submitted(thread_id, ids[0]).path.unlink()
+    view = await service.read_thread(thread_id)
+    turn = next(turn for turn in view["turns"] if turn["id"] == turn_id)
+    assert next(item for item in turn["items"] if item["type"] == "userMessage")["attachments"][0]["available"] is False
+    subscription, replay, _cursor, _resync = await service.subscribe_events(thread_id, after_sequence=0)
+    attachment_events = [event for event in replay if event.data.get("attachments")]
+    assert attachment_events and attachment_events[0].data["attachments"][0]["available"] is False
+    await service.event_hub.close(subscription)
+
+
+@pytest.mark.asyncio
+async def test_attachments_reject_active_goal_and_goal_command_before_binding(tmp_path):
+    fake = FakeCodex(tmp_path)
+    service = make_service(fake, tmp_path)
+    store = ConversationAttachmentStore(service.registry.get("agent_app_server"))
+    attachment = await store.upload("test.log", chunks(b"test"))
+    ids = [attachment.metadata["id"]]
+    with pytest.raises(ConsoleBadRequest):
+        await service.start_turn("thr_one", prompt="/goal test", model=None, attachment_ids=ids)
+    await service.start_goal("thr_one", objective="goal", token_budget=None, model=None, reasoning_effort=None)
+    with pytest.raises(ConsoleConflict):
+        await service.start_turn("thr_one", prompt="test", model=None, attachment_ids=ids)
+    assert store.validate_pending(ids)
+    await service.turn_manager.shutdown(timeout=1)
+
+
+@pytest.mark.asyncio
+async def test_uncertain_attachment_submission_preserves_new_thread_and_files(tmp_path, monkeypatch):
+    from codex_service import ConsoleSubmissionUncertain
+
+    fake = FakeCodex(tmp_path)
+    service = make_service(fake, tmp_path)
+    monkeypatch.setattr(service, "_generate_session_title", AsyncMock(return_value="Attachments"))
+    store = ConversationAttachmentStore(service.registry.get("agent_app_server"))
+    attachment = await store.upload("test.log", chunks(b"test"))
+    async def timeout(*args, **kwargs):
+        raise TimeoutError
+    monkeypatch.setattr(FakeThread, "turn", timeout)
+    with pytest.raises(ConsoleSubmissionUncertain):
+        await service.create_thread_from_prompt(project_key="agent_app_server", prompt="test", model=None,
+                                                reasoning_effort=None, attachment_ids=[attachment.metadata["id"]])
+    thread_id = next(iter(service._uncertain_attachment_threads))
+    assert thread_id in fake.threads
+    assert store.submitted(thread_id, attachment.metadata["id"]).path.exists()
+
+
+@pytest.mark.asyncio
+async def test_definite_sdk_rejection_restores_pending_attachments(tmp_path, monkeypatch):
+    fake = FakeCodex(tmp_path)
+    service = make_service(fake, tmp_path)
+    monkeypatch.setattr(service, "_generate_session_title", AsyncMock(return_value="Attachments"))
+    store = ConversationAttachmentStore(service.registry.get("agent_app_server"))
+    attachment = await store.upload("test.log", chunks(b"test"))
+    ids = [attachment.metadata["id"]]
+    async def invalid(*args, **kwargs):
+        raise InvalidParamsError(-32602, "bad input")
+    monkeypatch.setattr(FakeThread, "turn", invalid)
+    with pytest.raises(ConsoleBadRequest):
+        await service.create_thread_from_prompt(project_key="agent_app_server", prompt="test", model=None,
+                                                reasoning_effort=None, attachment_ids=ids)
+    assert store.validate_pending(ids)
+    assert not service._uncertain_attachment_threads
+    assert not any(key.startswith("thr_created_") for key in fake.threads)
+
+
+@pytest.mark.asyncio
+async def test_external_active_thread_rejects_attachments_without_binding(tmp_path):
+    fake = FakeCodex(tmp_path)
+    service = make_service(fake, tmp_path)
+    store = ConversationAttachmentStore(service.registry.get("agent_app_server"))
+    attachment = await store.upload("test.log", chunks(b"test"))
+    fake.threads["thr_one"]["status"] = {"type": "active", "active_flags": []}
+    with pytest.raises(ConsoleConflict):
+        await service.start_turn("thr_one", prompt="test", model=None, attachment_ids=[attachment.metadata["id"]])
+    assert attachment.path.exists()
+    assert not fake.turn_requests
 
 
 @pytest.mark.asyncio

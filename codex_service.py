@@ -7,15 +7,17 @@ import json
 import time
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
-from openai_codex import ApprovalMode, AsyncThread, Sandbox
+from openai_codex import ApprovalMode, AsyncThread, LocalImageInput, Sandbox, TextInput
 from openai_codex.errors import InvalidParamsError, InvalidRequestError
 from openai_codex.generated.v2_all import ThreadDeleteParams, ThreadDeleteResponse
+from starlette.concurrency import run_in_threadpool
 
 from codex_goal_adapter import CodexGoalAdapter
 from codex_serializers import field, notification_view, thread_view, to_primitive
+from conversation_attachments import REFERENCE_MARKER, ConversationAttachmentStore
 from event_hub import EventEnvelope, EventHub, Subscription
 from projects import Project, ProjectRegistry, UnknownProjectError
 from stream_journal import (
@@ -125,6 +127,12 @@ class ConsoleTimeout(ConsoleServiceError):
     safe_message = "Codex did not respond before the operation timed out."
 
 
+class ConsoleSubmissionUncertain(ConsoleServiceError):
+    status_code = 503
+    code = "attachment_submission_uncertain"
+    safe_message = "Codex may have accepted this message. Reopen the session to check its history before sending again."
+
+
 @dataclass(slots=True)
 class _PendingThread:
     """Server-created thread not yet discoverable through Codex thread/list."""
@@ -171,6 +179,7 @@ class CodexService:
         self._publish_lock = asyncio.Lock()
         self._recent_stream_fingerprints: dict[str, tuple[str, float]] = {}
         self._ignored_notification_threads: set[str] = set()
+        self._uncertain_attachment_threads: set[str] = set()
         self._turn_idle_reconciliation_tasks: dict[
             tuple[str, str], asyncio.Task[None]
         ] = {}
@@ -183,15 +192,25 @@ class CodexService:
             owner_id=self.tenant_id,
         ):
             return None
+        data = dict(record.get("data") or {})
+        project = self._thread_projects.get(thread_id)
+        if project is not None and data.get("attachments"):
+            data = await self._attachment_event_data(project, thread_id, data)
         return await self.event_hub.publish(
             thread_id,
             event_type=str(record.get("event_type") or "codex.notification"),
             method=str(record.get("method") or record.get("type") or "unknown"),
-            data=dict(record.get("data") or {}),
+            data=data,
             turn_id=(str(record["turn_id"]) if record.get("turn_id") else None),
             sequence=sequence,
             owner_id=self.tenant_id,
         )
+
+    @staticmethod
+    async def _attachment_event_data(project: Project, thread_id: str, data: dict[str, Any]) -> dict[str, Any]:
+        decorated = {**data, "attachments": [dict(item) for item in data["attachments"]]}
+        await run_in_threadpool(ConversationAttachmentStore(project).decorate_timeline, thread_id, [{"items": [decorated]}])
+        return decorated
 
     def _register_thread_project(self, thread_id: str, project: Project) -> None:
         self._thread_projects[thread_id] = project
@@ -796,8 +815,12 @@ class CodexService:
         prompt: str,
         model: str | None,
         reasoning_effort: str | None,
+        attachment_ids: list[str] | None = None,
     ) -> dict[str, Any]:
         project = self._project(project_key)
+        if attachment_ids:
+            self._validate_attachment_prompt(prompt)
+            await run_in_threadpool(ConversationAttachmentStore(project).validate_pending, attachment_ids)
         title = await self._generate_session_title(project, prompt)
         thread = await self.create_thread(
             project_key=project_key,
@@ -810,8 +833,13 @@ class CodexService:
                 prompt=prompt,
                 model=model,
                 reasoning_effort=reasoning_effort,
+                attachment_ids=attachment_ids,
             )
+        except ConsoleSubmissionUncertain:
+            raise
         except (asyncio.CancelledError, Exception):
+            if str(thread["id"]) in self._uncertain_attachment_threads:
+                raise
             try:
                 await self.delete_thread(str(thread["id"]))
             except ConsoleServiceError as cleanup_error:
@@ -915,6 +943,7 @@ class CodexService:
                 history_turns=history_view.get("turns", []),
             )
         journal_diff = ""
+        await run_in_threadpool(ConversationAttachmentStore(project).decorate_timeline, thread_id, turns)
         journal_usage: dict[str, Any] | None = None
         for event in journal.events:
             data = event.get("data") if isinstance(event.get("data"), dict) else {}
@@ -992,6 +1021,9 @@ class CodexService:
         )
         replay_by_sequence = {event.sequence: event for event in [*subscription.initial_events, *durable_replay]}
         replay = [replay_by_sequence[key] for key in sorted(replay_by_sequence)]
+        for index, event in enumerate(replay):
+            if event.data.get("attachments"):
+                replay[index] = replace(event, data=await self._attachment_event_data(project, thread_id, event.data))
         replay_boundary = (
             journal.cursor
             if journal.exists
@@ -1265,7 +1297,11 @@ class CodexService:
         prompt: str,
         model: str | None,
         reasoning_effort: str | None = None,
+        attachment_ids: list[str] | None = None,
     ) -> dict[str, Any]:
+        attachment_ids = attachment_ids or []
+        if attachment_ids:
+            self._validate_attachment_prompt(prompt)
         try:
             await self.turn_manager.reserve(
                 thread_id,
@@ -1285,8 +1321,10 @@ class CodexService:
                 "reasoning_effort": reasoning_effort,
             },
         )
+        attachments = []
+        submitted_to_sdk = False
         try:
-            _project, thread, _response = await self._authorized_thread(
+            project, thread, _response = await self._authorized_thread(
                 thread_id,
                 include_turns=False,
             )
@@ -1300,9 +1338,30 @@ class CodexService:
                 persisted_goal.get("status", "")
             ).lower() == "active":
                 raise ConsoleConflict
+            if attachment_ids:
+                self._require_idle_attachment_thread(_response)
+            store = ConversationAttachmentStore(project)
+            attachments = await run_in_threadpool(store.bind, thread_id, attachment_ids)
+            sdk_input = prompt
+            if attachments:
+                references = [
+                    {"name": item.metadata["name"], "path": str(item.path)}
+                    for item in attachments if item.metadata["mime"] == "text/plain"
+                ]
+                text = prompt
+                if references:
+                    text += REFERENCE_MARKER + "Read these UTF-8 files as needed:\n" + json.dumps(references, ensure_ascii=False)
+                    text += "\n[/Console attachment file references]"
+                sdk_input = [TextInput(text)] + [
+                    LocalImageInput(str(item.path)) for item in attachments if item.metadata["mime"].startswith("image/")
+                ]
+                latest = await self._read_thread_handle(thread, include_turns=False, operation="attachment_turn_state")
+                self._require_idle_attachment_thread(latest)
+                self._uncertain_attachment_threads.add(thread_id)
+            submitted_to_sdk = True
             handle = await self._call(
                 thread.turn(
-                    prompt,
+                    sdk_input,
                     effort=reasoning_effort,
                     model=model,
                     approval_mode=self.approval_mode,
@@ -1330,6 +1389,7 @@ class CodexService:
                         "id": user_item_id,
                         "type": "userMessage",
                         "content": [{"type": "text", "text": prompt}],
+                        "attachments": [item.message() for item in attachments],
                     }
                 },
                 turn_id=turn_id,
@@ -1353,13 +1413,18 @@ class CodexService:
                 },
                 turn_id=turn_id,
             )
+            self._uncertain_attachment_threads.discard(thread_id)
             return {
                 "accepted": True,
                 "thread_id": thread_id,
                 "turn_id": turn_id,
                 "journal_cursor": running_event.sequence if running_event else None,
+                "attachments": [item.message() for item in attachments],
             }
         except asyncio.CancelledError:
+            if attachments and not submitted_to_sdk:
+                await run_in_threadpool(store.restore_pending, thread_id, attachment_ids)
+                self._uncertain_attachment_threads.discard(thread_id)
             await self.turn_manager.finish(thread_id, owner_id=self.tenant_id)
             await self._publish(
                 thread_id,
@@ -1367,7 +1432,10 @@ class CodexService:
                 method="console.turn.idle",
             )
             raise
-        except Exception:
+        except Exception as exc:
+            if attachments and (not submitted_to_sdk or isinstance(exc, ConsoleBadRequest)):
+                await run_in_threadpool(store.restore_pending, thread_id, attachment_ids)
+                self._uncertain_attachment_threads.discard(thread_id)
             await self.turn_manager.finish(thread_id, owner_id=self.tenant_id)
             await self._publish(
                 thread_id,
@@ -1375,7 +1443,28 @@ class CodexService:
                 method="console.turn.error",
                 data={"error_code": "turn_start_failed"},
             )
+            if attachments and thread_id in self._uncertain_attachment_threads:
+                raise ConsoleSubmissionUncertain from exc
             raise
+
+    @staticmethod
+    def _require_idle_attachment_thread(response: Any) -> None:
+        status = to_primitive(field(field(response, "thread"), "status"))
+        if isinstance(status, dict):
+            status = status.get("root", status)
+            status = status.get("type") if isinstance(status, dict) else status
+        if str(status).lower() in {"active", "running", "starting"}:
+            raise ConsoleConflict
+
+    @staticmethod
+    def _validate_attachment_prompt(prompt: str) -> None:
+        text = prompt.strip()
+        if not text or text == "/goal" or text.startswith("/goal "):
+            raise ConsoleBadRequest
+
+    async def open_attachment(self, thread_id: str, attachment_id: str):
+        project, _thread, _response = await self._authorized_thread(thread_id, include_turns=False, resume=False)
+        return await run_in_threadpool(ConversationAttachmentStore(project).open_submitted, thread_id, attachment_id)
 
     @staticmethod
     def _goal_view(goal: Any | None) -> dict[str, Any] | None:

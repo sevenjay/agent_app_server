@@ -48,6 +48,11 @@ window.codexConsole = function codexConsole() {
     sessionActionsThreadId: "",
     draftSession: false,
     prompt: "",
+    composerAttachments: [],
+    composerSubmitting: false,
+    attachmentSubmissionUncertain: false,
+    attachmentCounter: 0,
+    attachmentDragOver: false,
     active: false,
     runningThreadIds: [],
     busy: false,
@@ -56,6 +61,8 @@ window.codexConsole = function codexConsole() {
     lastEventSequences: Object.create(null),
     liveEvents: [],
     liveTimelineItems: [],
+    timelineSnapshotThreadId: "",
+    timelineSnapshotUserMessages: [],
     liveBlockOpen: {},
     livePlans: [],
     livePlanSnapshotCursor: null,
@@ -592,6 +599,7 @@ window.codexConsole = function codexConsole() {
     },
 
     async selectProject(projectKey) {
+      if (this.composerSubmitting) return;
       if (this.projectKey === projectKey) {
         await this.copyProjectPath(projectKey);
         return;
@@ -1127,6 +1135,9 @@ window.codexConsole = function codexConsole() {
 
     async selectThread(threadId) {
       this.modelSettingsOpen = false;
+      if (this.composerSubmitting) return;
+      if (this.threadId !== threadId) this.clearAttachmentDraft();
+      this.attachmentSubmissionUncertain = false;
       this.sessionActionsThreadId = "";
       this.draftSession = false;
       this.errorMessage = "";
@@ -1194,11 +1205,23 @@ window.codexConsole = function codexConsole() {
       if (!snapshot) return;
       const cursor = Number(snapshot.dataset.journalCursor);
       if (!Number.isSafeInteger(cursor) || cursor < 0) return;
+      this.timelineSnapshotThreadId = this.threadId;
+      this.timelineSnapshotUserMessages = Array.from(snapshot.querySelectorAll(":scope > .turn-section > article[data-user-message]"), (element) => ({
+        ...JSON.parse(element.dataset.userMessage),
+        kind: "user",
+        text: Array.from(element.querySelectorAll(":scope > [data-markdown]"), part => part.dataset.markdown).join("\n"),
+      }));
       this.rememberEventSequence(this.threadId, cursor);
+      let refreshAttachmentCards = false;
       this.liveTimelineItems = this.liveTimelineItems.filter((item) => {
         const sequence = Number(item.sequence);
-        return !Number.isSafeInteger(sequence) || sequence > cursor;
+        if (Number.isSafeInteger(sequence) && sequence <= cursor) return false;
+        const rendered = this.matchingAttachmentMessage(this.timelineSnapshotUserMessages, item);
+        if (!rendered) return true;
+        refreshAttachmentCards ||= Boolean(item.attachments?.length && !rendered.attachmentIds.length);
+        return false;
       });
+      if (refreshAttachmentCards) this.refreshThreadAndList().catch(error => this.showError(error));
       this.pendingAgentMessageDeltas = this.pendingAgentMessageDeltas.filter(
         (segment) => {
           const sequence = Number(segment.sequence);
@@ -1263,6 +1286,7 @@ window.codexConsole = function codexConsole() {
     },
 
     async newThread() {
+      if (this.composerSubmitting) return;
       if (!this.projectKey) {
         this.errorMessage = "Choose a project first.";
         return;
@@ -1395,6 +1419,7 @@ window.codexConsole = function codexConsole() {
         this.queueAgentMessageDelta(event);
       }
       if (event.method === "item/completed") {
+        this.recordCompletedUserMessage(event);
         this.recordCompletedAgentMessage(event);
         this.recordCompletedToolItem(event);
       }
@@ -1752,7 +1777,7 @@ window.codexConsole = function codexConsole() {
       ].includes(item.type);
     },
 
-    appendOptimisticUserMessage(text, turnId = "") {
+    appendOptimisticUserMessage(text, turnId = "", attachments = []) {
       this.flushQueuedAgentMessages();
       this.finishStreamingAgentMessages();
       this.liveResponseSegment += 1;
@@ -1762,6 +1787,7 @@ window.codexConsole = function codexConsole() {
         kind: "user",
         turnId: String(turnId || ""),
         text,
+        attachments,
       });
       this.scrollTimelineToBottom();
       return key;
@@ -1853,6 +1879,9 @@ window.codexConsole = function codexConsole() {
         if (Number.isSafeInteger(durableSequence) && durableSequence >= 0) {
           item.sequence = durableSequence;
         }
+        if (this.timelineSnapshotThreadId === this.threadId && this.matchingAttachmentMessage(this.timelineSnapshotUserMessages, item)) {
+          this.removeLiveMessage(key);
+        }
       }
     },
 
@@ -1906,6 +1935,8 @@ window.codexConsole = function codexConsole() {
       this.pendingAgentMessageDeltas = [];
       this.pinTimelineAfterAgentFlush = false;
       this.liveTimelineItems = [];
+      this.timelineSnapshotThreadId = "";
+      this.timelineSnapshotUserMessages = [];
       this.liveBlockOpen = {};
       this.liveResponseSegment = 0;
       this.scheduleToolCardToggleStateSync();
@@ -1944,10 +1975,230 @@ window.codexConsole = function codexConsole() {
       this.composerResizeObserver.observe(composer);
     },
 
+    attachmentUrl(attachment, threadId = this.threadId) {
+      return `/api/codex/threads/${encodeURIComponent(threadId)}/attachments/${encodeURIComponent(attachment.id)}`;
+    },
+
+    attachmentSize(size) {
+      return size < 1024 * 1024 ? `${Math.ceil(size / 1024)} KiB` : `${(size / 1024 / 1024).toFixed(1)} MiB`;
+    },
+
+    addComposerFiles(files) {
+      if (this.composerSubmitting || !this.projectKey) return;
+      const additions = Array.from(files || []);
+      const all = [...this.composerAttachments.map(item => item.file), ...additions];
+      if (all.length > 5 || all.some(file => file.size > 10 * 1024 * 1024) ||
+          all.reduce((total, file) => total + file.size, 0) > 25 * 1024 * 1024) {
+        this.errorMessage = "Attach up to 5 files, 10 MiB each and 25 MiB total.";
+        return;
+      }
+      if (additions.some(file => !/\.(png|jpe?g|txt|md|log)$/i.test(file.name))) {
+        this.errorMessage = "Choose PNG, JPEG, or UTF-8 .txt, .md, .log files.";
+        return;
+      }
+      this.errorMessage = "";
+      for (const file of additions) {
+        this.composerAttachments.push({
+          key: `attachment-${this.attachmentCounter++}`, file, name: file.name,
+          size: file.size, projectKey: this.projectKey, id: null, mime: null,
+          preview: /\.(png|jpe?g)$/i.test(file.name) ? URL.createObjectURL(file) : "",
+          status: "Ready", error: "",
+        });
+      }
+    },
+
+    pasteComposerFiles(event) {
+      const files = Array.from(event.clipboardData?.items || [])
+        .filter(item => item.kind === "file" && item.type.startsWith("image/"))
+        .map(item => item.getAsFile()).filter(Boolean);
+      if (!files.length) return;
+      event.preventDefault();
+      this.addComposerFiles(files);
+    },
+
+    dropComposerFiles(event) {
+      this.attachmentDragOver = false;
+      if (!event.dataTransfer?.files?.length) return;
+      event.preventDefault();
+      this.addComposerFiles(event.dataTransfer.files);
+    },
+
+    async deletePendingAttachment(item) {
+      if (!item.id) return;
+      try {
+        await this.api(`/api/projects/${encodeURIComponent(item.projectKey)}/conversation-attachments/${encodeURIComponent(item.id)}`, { method: "DELETE" });
+      } catch (error) {
+        // Expired/committed files are not pending drafts; abandoned uploads expire.
+        if (error.status !== 404) this.showError(error);
+      }
+    },
+
+    async removeComposerAttachment(key) {
+      if (this.composerSubmitting) return;
+      const item = this.composerAttachments.find(item => item.key === key);
+      if (!item) return;
+      this.composerAttachments = this.composerAttachments.filter(item => item.key !== key);
+      if (item.preview) URL.revokeObjectURL(item.preview);
+      await this.deletePendingAttachment(item);
+    },
+
+    clearAttachmentDraft(submitted = false) {
+      for (const item of this.composerAttachments) {
+        if (item.preview) URL.revokeObjectURL(item.preview);
+        if (!submitted) void this.deletePendingAttachment(item);
+      }
+      this.composerAttachments = [];
+      this.attachmentSubmissionUncertain = false;
+      this.attachmentDragOver = false;
+    },
+
+    destroy() {
+      this.clearAttachmentDraft();
+      this.composerResizeObserver?.disconnect();
+      this.closeEvents();
+    },
+
+    async uploadComposerAttachments() {
+      for (const item of this.composerAttachments) {
+        if (item.id) continue;
+        item.status = "Uploading…";
+        item.error = "";
+        try {
+          const result = await this.api(
+            `/api/projects/${encodeURIComponent(item.projectKey)}/conversation-attachments?name=${encodeURIComponent(item.name)}`,
+            { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: item.file },
+          );
+          Object.assign(item, result, { status: "Uploaded" });
+        } catch (error) {
+          item.status = "Upload failed";
+          item.error = error.message;
+          throw error;
+        }
+      }
+      return this.composerAttachments.map(item => item.id);
+    },
+
+    async submitAttachedPrompt(text) {
+      if (this.attachmentSubmissionUncertain) {
+        this.errorMessage = "Delivery is uncertain. Reopen the session and check its history before sending again.";
+        return;
+      }
+      const draft = this.draftSession && !this.threadId;
+      if (!draft && (!this.threadId || !this.streamReady)) {
+        this.errorMessage = "Wait for the live stream before sending.";
+        return;
+      }
+      const threadId = this.threadId;
+      const projectKey = this.projectKey;
+      const requestedModel = this.model || this.currentModelId || null;
+      const effort = this.reasoningEffort || this.defaultReasoningEffort || null;
+      let messageKey = null;
+      let submitting = false;
+      this.composerSubmitting = true;
+      this.busy = true;
+      this.errorMessage = "";
+      try {
+        const ids = await this.uploadComposerAttachments();
+        if (this.threadId !== threadId || this.projectKey !== projectKey || this.active || this.liveGoal?.status === "active") {
+          throw new Error("The session changed while uploading. Your draft has been kept; send it when a new turn is available.");
+        }
+        const attachments = this.composerAttachments.map(item => ({
+          id: item.id, name: item.name, mime: item.mime, size: item.size,
+          delivery: item.mime.startsWith("image/") ? "vision" : "file_reference",
+          available: true,
+        }));
+        // Until binding succeeds the cards show filenames, not premature downloads.
+        if (!draft) messageKey = this.appendOptimisticUserMessage(text, "", attachments.map(item => ({ ...item, pending: true })));
+        const body = draft
+          ? { project_key: projectKey, initial_prompt: text, initial_attachment_ids: ids, model: requestedModel, reasoning_effort: effort }
+          : { prompt: text, attachment_ids: ids, model: requestedModel, reasoning_effort: effort };
+        submitting = true;
+        const result = await this.api(draft ? "/api/codex/threads" : `/api/codex/threads/${encodeURIComponent(threadId)}/turns`, {
+          method: "POST", body: JSON.stringify(body),
+        });
+        submitting = false;
+        if (this.prompt.trim() === text) this.prompt = "";
+        this.clearAttachmentDraft(true);
+        if (draft) {
+          this.markRunning(result.id, Boolean(result.accepted));
+          this.composerSubmitting = false;
+          await this.selectThread(result.id);
+        } else {
+          this.bindLiveMessageToTurn(messageKey, result.turn_id, result.journal_cursor);
+          const message = this.liveTimelineItems.find(item => item.key === messageKey);
+          if (message) message.attachments = attachments;
+        }
+      } catch (error) {
+        if (messageKey) this.removeLiveMessage(messageKey);
+        if (submitting && (!error.status || error.status >= 500)) {
+          this.attachmentSubmissionUncertain = true;
+          error.message = "Codex may have accepted this message. Reopen the session to check its history before sending again.";
+        }
+        this.showError(error);
+      } finally {
+        this.composerSubmitting = false;
+        this.busy = false;
+      }
+    },
+
+    matchingAttachmentMessage(messages, incoming, allowPending = false) {
+      if (incoming.kind !== "user" || !incoming.turnId) return null;
+      const incomingIds = incoming.attachmentIds || (incoming.attachments || []).map(item => item.id);
+      if (!incomingIds.length && !incoming.attachmentsUnavailable) return null;
+      const matches = messages.filter(message => {
+        if (message.kind !== "user" || (message.turnId !== incoming.turnId && !(allowPending && !message.turnId))) return false;
+        const ids = message.attachmentIds || (message.attachments || []).map(item => item.id);
+        if (!ids.length && !message.attachmentsUnavailable) return false;
+        if (message.itemIds?.some(id => id && incoming.itemIds?.includes(id))) return true;
+        if (message.text !== incoming.text) return false;
+        // SDK echoes lack our metadata. When both sides have IDs, require the same files.
+        return !ids.length || !incomingIds.length || (ids.length === incomingIds.length && ids.every(id => incomingIds.includes(id)));
+      });
+      return matches.length === 1 ? matches[0] : null;
+    },
+
+    recordCompletedUserMessage(event) {
+      const data = event.data || {};
+      if (data.item_type !== "userMessage" || (!data.attachments?.length && !data.attachments_unavailable)) return;
+      const turnId = String(event.turn_id || "");
+      const cards = (data.attachments || []).map(item => ({ ...item, available: item.available !== false }));
+      const incoming = {
+        key: `user:${turnId}:${data.item_id}`, kind: "user", turnId, text: data.text || "",
+        itemIds: data.item_id ? [data.item_id] : [],
+        attachments: cards, attachmentsUnavailable: Boolean(data.attachments_unavailable && !cards.length), sequence: Number(event.sequence),
+      };
+      // A newer sequence can still be an echo of a user message already rendered by HTMX.
+      const rendered = this.timelineSnapshotThreadId === this.threadId
+        ? this.matchingAttachmentMessage(this.timelineSnapshotUserMessages, incoming) : null;
+      const existing = this.matchingAttachmentMessage(this.liveTimelineItems, incoming, true);
+      if (rendered) {
+        if (existing) this.removeLiveMessage(existing.key);
+        if (cards.length && !rendered.attachmentIds.length) this.refreshThreadAndList().catch(error => this.showError(error));
+        return;
+      }
+      if (existing) {
+        existing.turnId = turnId;
+        if (cards.length) existing.attachments = cards;
+        existing.itemIds = [...new Set([...(existing.itemIds || []), ...incoming.itemIds])];
+        existing.attachmentsUnavailable = Boolean(!existing.attachments?.length && (existing.attachmentsUnavailable || incoming.attachmentsUnavailable));
+        existing.sequence = Math.max(Number(existing.sequence) || 0, incoming.sequence);
+      } else {
+        this.liveTimelineItems.push(incoming);
+      }
+    },
+
     async submitPrompt() {
       const text = this.prompt.trim();
-      if (!text || this.busy) return;
+      if (!text || this.busy || this.composerSubmitting) return;
       const goalCommand = text === "/goal" || text.startsWith("/goal ");
+      if (this.composerAttachments.length) {
+        if (goalCommand || this.active || this.liveGoal?.status === "active") {
+          this.errorMessage = "Attachments are only supported in a new turn. Steer and /goal keep text only; your draft has been kept.";
+          return;
+        }
+        await this.submitAttachedPrompt(text);
+        return;
+      }
       if (goalCommand && this.draftSession && !this.threadId) {
         await this.submitDraftGoal(text);
         return;
@@ -2379,6 +2630,7 @@ window.codexConsole = function codexConsole() {
     },
 
     async forkThread(threadId = this.threadId) {
+      if (this.composerSubmitting) return;
       if (!threadId) return;
       try {
         const thread = await this.api(
@@ -2393,6 +2645,7 @@ window.codexConsole = function codexConsole() {
     },
 
     async archiveThread(threadId = this.threadId) {
+      if (this.composerSubmitting) return;
       if (!threadId || !window.confirm("Archive this session?")) return;
       try {
         await this.api(
@@ -2412,6 +2665,7 @@ window.codexConsole = function codexConsole() {
     },
 
     async deleteThread(threadId = this.threadId) {
+      if (this.composerSubmitting) return;
       if (
         !threadId ||
         !window.confirm("Delete this session permanently? This cannot be undone.")
@@ -2441,6 +2695,7 @@ window.codexConsole = function codexConsole() {
     },
 
     async unarchiveThread(threadId = this.threadId) {
+      if (this.composerSubmitting) return;
       if (!threadId) return;
       try {
         await this.api(
@@ -2461,6 +2716,7 @@ window.codexConsole = function codexConsole() {
 
     clearThreadPanels() {
       this.modelSettingsOpen = false;
+      this.clearAttachmentDraft();
       this.draftSession = false;
       this.active = false;
       this.conversationTab = "timeline";

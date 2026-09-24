@@ -16,6 +16,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
+from conversation_attachments import REFERENCE_MARKER, message_attachment_fields
 from utility.log import LOGD, LOGW
 
 JOURNAL_VERSION = 1
@@ -201,10 +202,16 @@ def _message_text(item: dict[str, Any]) -> str:
     for content in item.get("content", ()) if isinstance(item.get("content"), list) else ():
         if not isinstance(content, dict):
             continue
+        content = content.get("root", content)
+        if content.get("type", "text") != "text":
+            continue
         candidate = content.get("text", content.get("value"))
         if isinstance(candidate, str):
             values.append(candidate)
-    return "\n".join(values)
+    text = "\n".join(values)
+    if item.get("type") == "userMessage" and not item.get("attachments") and text.endswith("\n[/Console attachment file references]"):
+        text = text.rpartition(REFERENCE_MARKER)[0] or text
+    return text
 
 
 def _safe_tool_item(item: dict[str, Any]) -> dict[str, Any]:
@@ -376,6 +383,8 @@ def normalize_event(
                 "item_id": item_id,
                 "item_type": sdk_type,
             }
+            if sdk_type == "userMessage":
+                safe_data.update(message_attachment_fields(item))
         else:
             safe_data = {"item": _safe_tool_item(item)}
     elif method == "item/started" and item:
@@ -541,6 +550,8 @@ def _history_item_event(
     normalized_type = type_map.get(sdk_type, "tool.completed")
     if sdk_type in {"userMessage", "agentMessage", "plan"}:
         data = {"text": _redact_text(_message_text(item))}
+        if sdk_type == "userMessage":
+            data.update(message_attachment_fields(item))
     else:
         data = {"item": _safe_tool_item(item)}
     return {
@@ -734,6 +745,8 @@ class StreamJournal:
             if root.is_symlink() or not root.is_dir():
                 continue
             for directory in root.iterdir():
+                if directory.name == ".attachment-pending":
+                    continue
                 if directory.name == ".trash" or directory.is_symlink() or not directory.is_dir():
                     continue
                 path = directory / "events.jsonl"
@@ -1047,6 +1060,8 @@ class StreamJournal:
             if root.is_symlink() or not root.is_dir():
                 continue
             for directory in root.iterdir():
+                if directory.name == ".attachment-pending":
+                    continue
                 if directory.is_symlink() or not directory.is_dir():
                     continue
                 candidates = list(directory.iterdir()) if directory.name == ".trash" else [directory]
@@ -1175,6 +1190,16 @@ def materialize_timeline(
             state = by_source_id.get((source, source_id)) if source_id else None
             text = str(data.get("text") or data.get("delta") or "")
 
+            # The app's first user item carries the authoritative attachment cards.
+            # SDK echoes can use a different id (even within the same stream).
+            if state is None and ui_type == "userMessage":
+                matches = [candidate for candidate in states if candidate["type"] == ui_type
+                           and candidate.get("text") == text
+                           and (candidate.get("attachments") or candidate.get("attachments_unavailable"))
+                           and (data.get("attachments") or data.get("attachments_unavailable"))]
+                if len(matches) == 1:
+                    state = matches[0]
+
             if state is None and source in {"codex_history", "codex_stream"}:
                 other_source = "codex_stream" if source == "codex_history" else "codex_history"
                 unmatched = [
@@ -1239,6 +1264,10 @@ def materialize_timeline(
                 state["text"] = text
             elif isinstance(data.get("item"), dict):
                 state["item"] = dict(data["item"])
+            if ui_type == "userMessage":
+                if data.get("attachments"):
+                    state["attachments"] = data["attachments"]
+                state["attachments_unavailable"] = bool(data.get("attachments_unavailable") or state.get("attachments_unavailable"))
 
         items: list[dict[str, Any]] = []
         for state in sorted(states, key=lambda candidate: candidate["first_seq"]):
@@ -1251,6 +1280,8 @@ def materialize_timeline(
                 }
                 if state["type"] == "userMessage":
                     item["content"] = [{"type": "text", "text": state["text"]}]
+                    item["attachments"] = [dict(attachment) for attachment in state.get("attachments", [])]
+                    item["attachments_unavailable"] = bool(state.get("attachments_unavailable") and not item["attachments"])
                 else:
                     item["text"] = state["text"]
             else:

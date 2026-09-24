@@ -3,15 +3,38 @@
   data-thread-id="{{ thread.id if thread else '' }}"
   x-init='{% if thread %}syncThreadActive({{ thread.id|tojson }}, {{ "true" if active else "false" }}, {{ active.get("model")|tojson if active else "null" }}, {{ active.get("reasoning_effort")|tojson if active else "null" }}, {{ active.get("kind")|tojson if active else "null" }}); {% endif %}$watch("prompt", () => $nextTick(() => resizeComposer($refs.composerInput))); $nextTick(() => resizeComposer($refs.composerInput))'
   @submit.prevent="submitPrompt()"
+  @dragover="if ($event.dataTransfer.types.includes('Files')) { $event.preventDefault(); attachmentDragOver = true; }"
+  @dragleave="if (!$el.contains($event.relatedTarget)) attachmentDragOver = false"
+  @drop="dropComposerFiles($event)"
+  :class="{ 'composer-drag-over': attachmentDragOver }"
 >
   <div class="composer-surface">
+    <input type="file" x-ref="attachmentPicker" class="sr-only" tabindex="-1" aria-label="Choose conversation attachments"
+      accept=".png,.jpg,.jpeg,.txt,.md,.log,image/png,image/jpeg,text/plain" multiple
+      @change="addComposerFiles($event.target.files); $event.target.value = ''" :disabled="composerSubmitting">
+    <div class="attachment-list composer-attachments" x-show="composerAttachments.length" x-cloak aria-live="polite">
+      <template x-for="attachment in composerAttachments" :key="attachment.key">
+        <div class="attachment-card">
+          <template x-if="attachment.preview"><img class="attachment-preview" :src="attachment.preview" :alt="attachment.name"></template>
+          <div class="attachment-details">
+            <span class="attachment-name" x-text="attachment.name" :title="attachment.name"></span>
+            <span class="attachment-meta" x-text="`${attachmentSize(attachment.size)} · ${attachment.status}`"></span>
+            <span class="attachment-error" x-show="attachment.error" x-text="attachment.error"></span>
+          </div>
+          <button type="button" class="attachment-remove" :aria-label="`Remove ${attachment.name}`"
+            :disabled="composerSubmitting" @click="removeComposerAttachment(attachment.key)">×</button>
+        </div>
+      </template>
+    </div>
     <label class="sr-only" for="composer-prompt">Message Codex</label>
     <textarea
       id="composer-prompt"
       x-ref="composerInput"
       x-model="prompt"
       @input="resizeComposer($el)"
-      @keydown.enter="if (!$event.shiftKey) { $event.preventDefault(); submitPrompt(); }"
+      @keydown.enter="if (!$event.shiftKey && !$event.isComposing && $event.keyCode !== 229) { $event.preventDefault(); submitPrompt(); }"
+      @paste="pasteComposerFiles($event)"
+      :readonly="composerSubmitting"
       class="composer-input pretty-scrollbar"
       rows="1"
       maxlength="200000"
@@ -19,6 +42,9 @@
     ></textarea>
 
     <div class="composer-toolbar">
+      <button type="button" class="composer-attach" aria-label="Add attachments"
+        title="Add PNG, JPEG, or UTF-8 text files (up to 5, 10 MiB each, 25 MiB total)"
+        :disabled="composerSubmitting" @click="$refs.attachmentPicker.click()"><span aria-hidden="true">＋</span></button>
       <div class="composer-actions">
         <button
           x-cloak
@@ -98,7 +124,7 @@
         <button
           type="submit"
           class="composer-submit"
-          :disabled="busy || (!draftSession && !active && !streamReady) || !prompt.trim()"
+          :disabled="busy || composerSubmitting || attachmentSubmissionUncertain || (!draftSession && !active && !streamReady) || !prompt.trim()"
           :aria-label="active ? 'Steer' : 'Send'"
           :title="active ? 'Steer' : 'Send'"
         >

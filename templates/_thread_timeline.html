@@ -1,3 +1,4 @@
+{% from '_attachment_cards.html' import attachment_cards %}
 {% macro turn_details(turn) -%}
   <button
     type="button"
@@ -119,14 +120,24 @@
             <div class="tool-block-items">
         {% endif %}
         {% if item_type == "userMessage" %}
-          <article class="message-card message-user">
+          <article class="message-card message-user"
+            data-user-message='{{ {
+              "turnId": turn.id,
+              "itemIds": [item.get("id", "")] + (item.get("source_ids", {}).values()|list),
+              "attachmentIds": item.get("attachments", [])|map(attribute="id")|list,
+              "attachmentsUnavailable": item.get("attachments_unavailable", false)
+            }|tojson }}'>
             {% for content in item.get("content", []) %}
+              {% if content.get("type") == "text" %}
               <div
                 class="markdown-body"
                 data-markdown="{{ content.get("text", content.get("value", "")) }}"
                 x-markdown="{ text: $el.dataset.markdown }"
               ></div>
+              {% endif %}
             {% endfor %}
+            <div x-data='{ cards: {{ item.get("attachments", [])|tojson }} }'>{{ attachment_cards('cards') }}</div>
+            {% if item.get("attachments_unavailable") %}<p class="attachment-meta">Attachment unavailable</p>{% endif %}
           </article>
         {% elif item_type == "agentMessage" %}
           <article class="message-card message-agent">
@@ -274,6 +285,8 @@
                     :class="{ 'streaming-markdown': item.kind === 'agent' && item.streaming }"
                     x-markdown="{ text: item.text, streaming: item.kind === 'agent' && item.streaming }"
                   ></div>
+                  {{ attachment_cards('(item.attachments || [])') }}
+                  <p class="attachment-meta" x-show="item.attachmentsUnavailable && !item.attachments?.length">Attachment unavailable</p>
                 </article>
                 <div
                   x-show="item.kind === 'agent'"

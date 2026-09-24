@@ -1,4 +1,5 @@
 import asyncio
+import json
 import tempfile
 from html.parser import HTMLParser
 from pathlib import Path
@@ -16,6 +17,7 @@ from projects import Project, ProjectRegistry
 from tenancy import LOCAL_TENANT_ID
 from tests.fakes import FakeCodex
 from tests.http_client import application_client
+from tests.test_conversation_attachments import png_bytes
 
 
 class ElementAttributeParser(HTMLParser):
@@ -46,6 +48,68 @@ def fake_application():
     application.state.test_project_directory = project_directory
     application.state.test_project_path = project_path
     return application, fake
+
+
+@pytest.mark.asyncio
+async def test_conversation_attachment_routes_and_safe_timeline(monkeypatch):
+    application, _fake = fake_application()
+    base = "/api/projects/agent_app_server/conversation-attachments"
+    async with application_client(application) as client:
+        async def forbid_body(_request):
+            raise AssertionError("Attachment uploads must stream")
+        with monkeypatch.context() as patch:
+            patch.setattr(Request, "body", forbid_body)
+            upload = await client.post(base, params={"name": "截圖.png"}, content=png_bytes(), headers={"Content-Type": "text/plain"})
+        assert upload.status_code == 201
+        attachment = upload.json()
+        assert set(attachment) == {"id", "name", "mime", "size"}
+        assert attachment["mime"] == "image/png"
+        download = f"/api/codex/threads/thr_one/attachments/{attachment['id']}"
+        assert (await client.get(download)).status_code == 404
+        prompt = "總結下這個檔案內容\n'\"<check> &"
+        response = await client.post("/api/codex/threads/thr_one/turns", json={"prompt": prompt, "attachment_ids": [attachment["id"]]})
+        assert response.status_code == 202
+        result = await client.get(download)
+        assert result.status_code == 200 and result.content == png_bytes()
+        assert result.headers["content-type"] == "image/png"
+        assert result.headers["content-disposition"].startswith("inline; filename*=UTF-8''")
+        assert result.headers["x-content-type-options"] == "nosniff"
+        assert (await client.get(download.replace("thr_one", "thr_other"))).status_code == 404
+        assert (await client.delete(f"{base}/{attachment['id']}")).status_code == 404
+        invalid = await client.post("/api/codex/threads/thr_one/steer", json={"prompt": "steer", "attachment_ids": [attachment["id"]]})
+        assert invalid.status_code == 422
+        html = (await client.get("/partials/threads/thr_one/timeline")).text
+        assert attachment["id"] in html
+        assert "payload.png" not in html
+        parser = ElementAttributeParser()
+        parser.feed(html)
+        rendered_messages = [json.loads(attrs["data-user-message"]) for tag, attrs in parser.elements if "data-user-message" in attrs]
+        attachment_message = next(message for message in rendered_messages if message["attachmentIds"])
+        assert attachment_message["turnId"] == response.json()["turn_id"]
+        assert attachment_message["attachmentIds"] == [attachment["id"]]
+        assert any(item_id.startswith("console-user-") for item_id in attachment_message["itemIds"])
+        assert attachment_message["attachmentsUnavailable"] is False
+        assert prompt in [attrs.get("data-markdown") for _, attrs in parser.elements]
+        await client.post("/api/codex/threads/thr_one/interrupt")
+        pending = await client.post(base, params={"name": "trace.log"}, content=b"hello")
+        assert (await client.delete(f"{base}/{pending.json()['id']}")).status_code == 204
+        assert (await client.post(base, params={"name": "bad.png"}, content=b"not png")).status_code == 400
+        assert (await client.post(base.replace("agent_app_server", "unknown"), params={"name": "trace.log"}, content=b"hello")).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_attachment_request_contract_requires_prompt_and_rejects_paths():
+    application, _ = fake_application()
+    async with application_client(application) as client:
+        for body in (
+            {"initial_attachment_ids": ["a" * 32]},
+            {"initial_goal": "goal", "initial_attachment_ids": ["a" * 32]},
+            {"initial_prompt": " ", "initial_attachment_ids": ["a" * 32]},
+            {"initial_prompt": "test", "initial_attachment_ids": ["../x"]},
+            {"initial_prompt": "test", "initial_attachment_ids": ["a" * 32] * 6},
+        ):
+            response = await client.post("/api/codex/threads", json={"project_key": "agent_app_server", **body})
+            assert response.status_code == 422
 
 
 @pytest.mark.asyncio

@@ -34,6 +34,26 @@ Web UI 稱一段對話為 Session；API 與 Codex SDK 使用 Thread／`thread`�
 
 File manager 拒絕 absolute path、path traversal、Windows-style separator、control characters、symbolic link 與 special file。預設不覆寫同名上傳；只有明確傳入 `overwrite=true` 才會取代既有 regular file。
 
+`.stream_journal` 是保留區，即使 `show_hidden=true` 也不列出；Files API 拒絕存取、建立、覆寫、重新命名或刪除這棵目錄。
+
+## 對話附件
+
+| Method | Path | 用途 |
+| --- | --- | --- |
+| `POST` | `/api/projects/{project_key}/conversation-attachments?name=...` | 一個 raw-body 檔案，回 `201 {id, name, mime, size}`；逐塊接收並限制實際位元組 |
+| `DELETE` | `/api/projects/{project_key}/conversation-attachments/{id}` | 刪除同 Project 尚未提交的附件，成功回 `204` |
+| `GET` | `/api/codex/threads/{thread_id}/attachments/{id}` | 經 Thread／Project 授權後預覽 PNG/JPEG 或下載文字檔 |
+
+支援 PNG、JPEG，以及 UTF-8 `.txt`、`.md`、`.log`；每則最多 5 檔、每檔 10 MiB、合計 25 MiB。圖片簽章與文字編碼由伺服器驗證，瀏覽器 MIME 不作為判斷依據。同名檔案有不同 ID，不覆寫；拒絕 symlink、special file、任意檔案路徑、重複 ID、跨 Project 或已提交 ID。
+
+`POST /api/codex/threads` 可帶 `initial_attachment_ids: string[]`，必須搭配非空的 `initial_prompt`。既有 Thread 的 `POST .../turns` 可帶 `attachment_ids: string[]`，必須搭配 `prompt`。兩者預設 `[]`，保留舊的純文字請求。Steer 與 Goal schema 不接受附件欄位；含附件的 `/goal` prompt 也會被拒絕。活動中的 Turn／Goal 不接受附件新訊息。
+
+圖片由 `LocalImageInput` 傳送，文字檔則透過伺服器產生的名稱／可讀路徑清單讓 agent 按需讀取。Timeline／SSE 的使用者訊息只呈現使用者原文與 `attachments` 安全 metadata（`id`、`name`、`mime`、`size`、`delivery`）；不提供由客戶端指定的路徑。Timeline 附件另有 `available` 狀態，已遺失的檔案不提供下載卡片。
+
+未提交附件於啟動、runtime health 定期巡查或後續上傳時清理，期限 24 小時。已提交附件跟隨 Stream Journal 保留與 Thread 刪除流程（預設 30 天）；過期後不保證可下載。Fork 不複製原 Thread 附件，缺少 metadata 的 history fallback 顯示附件不可用。
+
+`400 invalid_attachment` 表示格式、容量或檔案檢查失敗；`404 attachment_unavailable` 表示無法找到符合 scope／狀態的附件。若 SDK 可能已接受含附件的 Turn，但結果不明，回 `503 attachment_submission_uncertain` 並保留 Thread／附件；請先查看 Session history，不要自動重送。
+
 ## Threads（Sessions）
 
 | Method | Path | 用途 |

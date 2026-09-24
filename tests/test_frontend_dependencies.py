@@ -1,7 +1,7 @@
 from html.parser import HTMLParser
 from pathlib import Path
 
-from jinja2 import Environment
+from jinja2 import Environment, FileSystemLoader
 
 EXPECTED_CDN_DEFER = {
     "https://unpkg.com/htmx.org@4.0.0/dist/htmx.min.js": False,
@@ -193,7 +193,7 @@ def test_timeline_toolbar_toggles_cards_and_blocks_independently() -> None:
 
 
 def test_timeline_groups_adjacent_history_commands_without_reordering_messages() -> None:
-    template = Environment(autoescape=True).from_string(
+    template = Environment(autoescape=True, loader=FileSystemLoader("templates")).from_string(
         Path("templates/_thread_timeline.html").read_text(encoding="utf-8")
     )
     html = template.render(
@@ -222,7 +222,7 @@ def test_timeline_groups_adjacent_history_commands_without_reordering_messages()
 
 
 def test_history_file_groups_show_unique_files_before_the_total() -> None:
-    template = Environment(autoescape=True).from_string(
+    template = Environment(autoescape=True, loader=FileSystemLoader("templates")).from_string(
         Path("templates/_thread_timeline.html").read_text(encoding="utf-8")
     )
     html = template.render(

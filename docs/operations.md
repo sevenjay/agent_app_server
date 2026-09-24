@@ -222,11 +222,22 @@ npm run tw:build
 poetry install --with dev
 poetry run python -m pytest -q
 pipx run ruff check .
+node --test tests/*.test.cjs
 npm ci
 npm run tw:build
 ```
 
 Python tests 使用 fake Codex adapter，不啟動真實 app-server、不要求 login。Stream Journal 專用測試使用 pytest temporary Projects；測試涵蓋 durable replay、crash tail、redaction／truncation、cross-source alias、retention，以及既有 Project／CWD authorization、Turn、Goal、API／partials、runtime 與 frontend contracts。
+
+附件的真實 SDK 驗收是手動測試，平常啟動或部署不需要執行，也不包含在 pytest 中。首次驗收附件功能，或後續修改附件流程、SDK／runtime、sandbox 設定時，可另外執行：
+
+```bash
+poetry run python -m scripts.smoke_composer_attachments
+```
+
+這會使用登入帳號與模型額度，建立隔離的暫存 Project，測試新 Session 與既有 Thread 的「圖片 + 日誌」，並在結束後刪除測試 Session／檔案。答案只存在圖片像素與隨機產生的日誌內容；同時檢查持久化附件卡與 userMessage 去重。
+
+2026-09-24 使用者終端驗收通過：以 SDK 0.156.1 執行上述腳本，`new_session` 與 `new_turn` 均完成。兩次都正確辨識圖片中的 3 個紅色方塊，並透過實際 `rg` 命令讀到各自日誌中的隨機驗證碼（exit code 0）；每個 Turn 都只有 1 則 userMessage、2 張附件卡，腳本輸出 `PASS`。先前 agent 內的 SDK 測試程序曾回報 `bwrap: setting up uid map: Permission denied`，使用者終端未重現；該環境差異的確切原因仍未確認。此腳本涵蓋的端到端驗收已通過，瀏覽器實機互動仍待驗證。
 
 ## 部署
 

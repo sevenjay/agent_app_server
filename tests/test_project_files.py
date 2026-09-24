@@ -8,6 +8,32 @@ from tests.fakes import FakeCodex
 from tests.http_client import application_client
 
 
+@pytest.mark.asyncio
+async def test_journal_is_reserved_even_with_hidden_files_enabled(tmp_path):
+    application = file_application(tmp_path)
+    journal = tmp_path / ".stream_journal"
+    journal.mkdir()
+    (journal / "private.log").write_text("private")
+    (tmp_path / "normal.txt").write_text("normal")
+    base = "/api/projects/files_project/files"
+    async with application_client(application) as client:
+        listing = await client.get(base, params={"show_hidden": "true"})
+        assert ".stream_journal" not in {entry["name"] for entry in listing.json()["data"]}
+        requests = [
+            ("GET", base, {"params": {"path": ".stream_journal", "show_hidden": "true"}}),
+            ("GET", base + "/download", {"params": {"path": ".stream_journal/private.log"}}),
+            ("POST", base + "/upload", {"params": {"path": ".stream_journal", "name": "private.log", "overwrite": "true"}, "content": b"overwrite"}),
+            ("POST", base + "/upload", {"params": {"name": ".stream_journal"}, "content": b"overwrite"}),
+            ("POST", base + "/directories", {"json": {"name": ".stream_journal"}}),
+            ("PATCH", base, {"json": {"path": "normal.txt", "name": ".stream_journal"}}),
+            ("PATCH", base, {"json": {"path": ".stream_journal", "name": "exposed"}}),
+            ("DELETE", base, {"params": {"path": ".stream_journal"}}),
+        ]
+        for method, url, kwargs in requests:
+            assert (await client.request(method, url, **kwargs)).status_code == 400
+        assert (journal / "private.log").read_text() == "private"
+
+
 def file_application(project_path: Path):
     fake = FakeCodex(project_path)
     registry = ProjectRegistry(
