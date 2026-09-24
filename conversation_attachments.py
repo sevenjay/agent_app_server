@@ -24,8 +24,8 @@ from project_files import ProjectFileError, _validate_name
 from projects import Project
 
 MAX_ATTACHMENTS = 5
-MAX_FILE_BYTES = 10 * 1024 * 1024
-MAX_TOTAL_BYTES = 25 * 1024 * 1024
+MAX_FILE_BYTES = 50 * 1024 * 1024
+MAX_TOTAL_BYTES = 250 * 1024 * 1024
 PENDING_TTL_SECONDS = 24 * 60 * 60
 ATTACHMENT_ID_PATTERN = re.compile(r"^[a-f0-9]{32}$")
 THREAD_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
@@ -36,7 +36,7 @@ MIMES = {".png": "image/png", ".jpg": "image/jpeg", ".txt": "text/plain", ".md":
 class AttachmentError(ProjectFileError):
     status_code = 400
     code = "invalid_attachment"
-    safe_message = "Use PNG, JPEG, or UTF-8 .txt, .md, .log files (5 files, 10 MiB each, 25 MiB total)."
+    safe_message = "Use PNG, JPEG, or UTF-8 .txt, .md, .log files (5 files, 50 MiB each, 250 MiB total)."
 
 
 class AttachmentNotFound(AttachmentError):

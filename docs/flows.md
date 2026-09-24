@@ -73,7 +73,7 @@ Directory listing 預設略過 Linux 慣例中以 `.` 開頭的隱藏項目；Fi
 
 「＋」、桌面拖放與貼上圖片共用頂層 Alpine 的附件佇列；一般文字貼上維持 textarea 行為，輸入法組字中的 Enter 不會送出。HTMX 更新 composer 不重設佇列。附件綁定目前 Project／Thread 或新 Session 草稿，切換 scope 會釋放 `blob:` 預覽並清理 pending ID；不提供跨裝置草稿復原。
 
-1. 選檔時只保留瀏覽器 `File` 與縮圖，先檢查 5 檔／10 MiB／25 MiB 限制。
+1. 選檔時只保留瀏覽器 `File` 與縮圖，先檢查 5 檔／50 MiB／250 MiB 限制。
 2. 按送出後逐檔 raw-body 上傳，伺服器使用 `request.stream()` 寫入 `.stream_journal/.attachment-pending` 的暫存目錄，驗證後原子完成。上傳中不允許切換 scope 或修改此次草稿。
 3. 任一上傳失敗就停止，不提交部分訊息；保留文字與 File，重試時重用已成功的 pending ID。移除附件會 DELETE 該 pending ID。
 4. 全部上傳成功後重新確認 Thread 狀態，仍使用原定的新 Turn 路徑。若已變為 active，保留草稿並阻止送出；不改走 steer。`/goal` 與 active steer 含附件時也直接阻止。

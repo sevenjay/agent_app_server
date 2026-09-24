@@ -44,7 +44,7 @@ File manager 拒絕 absolute path、path traversal、Windows-style separator、c
 | `DELETE` | `/api/projects/{project_key}/conversation-attachments/{id}` | 刪除同 Project 尚未提交的附件，成功回 `204` |
 | `GET` | `/api/codex/threads/{thread_id}/attachments/{id}` | 經 Thread／Project 授權後預覽 PNG/JPEG 或下載文字檔 |
 
-支援 PNG、JPEG，以及 UTF-8 `.txt`、`.md`、`.log`；每則最多 5 檔、每檔 10 MiB、合計 25 MiB。圖片簽章與文字編碼由伺服器驗證，瀏覽器 MIME 不作為判斷依據。同名檔案有不同 ID，不覆寫；拒絕 symlink、special file、任意檔案路徑、重複 ID、跨 Project 或已提交 ID。
+支援 PNG、JPEG，以及 UTF-8 `.txt`、`.md`、`.log`；每則最多 5 檔、每檔 50 MiB、合計 250 MiB。圖片簽章與文字編碼由伺服器驗證，瀏覽器 MIME 不作為判斷依據。同名檔案有不同 ID，不覆寫；拒絕 symlink、special file、任意檔案路徑、重複 ID、跨 Project 或已提交 ID。
 
 `POST /api/codex/threads` 可帶 `initial_attachment_ids: string[]`，必須搭配非空的 `initial_prompt`。既有 Thread 的 `POST .../turns` 可帶 `attachment_ids: string[]`，必須搭配 `prompt`。兩者預設 `[]`，保留舊的純文字請求。Steer 與 Goal schema 不接受附件欄位；含附件的 `/goal` prompt 也會被拒絕。活動中的 Turn／Goal 不接受附件新訊息。
 

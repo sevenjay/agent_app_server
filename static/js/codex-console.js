@@ -1987,9 +1987,9 @@ window.codexConsole = function codexConsole() {
       if (this.composerSubmitting || !this.projectKey) return;
       const additions = Array.from(files || []);
       const all = [...this.composerAttachments.map(item => item.file), ...additions];
-      if (all.length > 5 || all.some(file => file.size > 10 * 1024 * 1024) ||
-          all.reduce((total, file) => total + file.size, 0) > 25 * 1024 * 1024) {
-        this.errorMessage = "Attach up to 5 files, 10 MiB each and 25 MiB total.";
+      if (all.length > 5 || all.some(file => file.size > 50 * 1024 * 1024) ||
+          all.reduce((total, file) => total + file.size, 0) > 250 * 1024 * 1024) {
+        this.errorMessage = "Attach up to 5 files, 50 MiB each and 250 MiB total.";
         return;
       }
       if (additions.some(file => !/\.(png|jpe?g|txt|md|log)$/i.test(file.name))) {

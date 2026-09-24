@@ -40,14 +40,18 @@ test("selection, drops, and pasted images use one queue; text paste stays native
   assert.equal(revoked.length, 2);
 });
 
-test("client rejects unsupported formats and every size limit without losing the queue", () => {
+test("client validates formats and attachment limits without losing the queue", () => {
   const { view } = composer();
   view.addComposerFiles([file("test.log")]);
-  for (const files of [[file("x.pdf")], [file("x.log", 10 * 1024 * 1024 + 1)], Array.from({ length: 5 }, () => file("a.txt")), Array.from({ length: 3 }, () => file("a.txt", 9 * 1024 * 1024))]) {
+  for (const files of [[file("x.pdf")], [file("x.log", 50 * 1024 * 1024 + 1)], Array.from({ length: 5 }, () => file("a.txt"))]) {
     view.addComposerFiles(files);
     assert.equal(view.composerAttachments.length, 1);
     assert.ok(view.errorMessage);
   }
+  view.clearAttachmentDraft();
+  view.addComposerFiles(Array.from({ length: 5 }, () => file("a.txt", 50 * 1024 * 1024)));
+  assert.equal(view.composerAttachments.length, 5);
+  assert.equal(view.errorMessage, "");
 });
 
 test("partial upload failure sends no message, then retries only the failed file", async () => {
