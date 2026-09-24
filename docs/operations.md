@@ -195,13 +195,19 @@ DATABASE_URL=sqlite+aiosqlite:////absolute/path/app.db poetry run python main.py
 前端是 server-rendered HTML，不使用 React、Vue、TypeScript 或 application bundler：
 
 - Jinja2 負責 HTML partials。
-- HTMX 2.0.4 負責 partial request／swap。
+- HTMX 4.0.0 負責 partial request／swap。
 - Alpine.js 3.16.3 管理 browser state 與操作協調。
 - HTMX timeline snapshot 提供 durable Journal cursor；Alpine.js 清除已由 snapshot 涵蓋的 transient items，再由原生 `EventSource` 從 JSONL cursor replay 並接上 EventHub live fan-out。
 - Marked 15.0.12 解析 Markdown，再由 DOMPurify 3.2.6 sanitize。
 - Tailwind CSS 4 是唯一需要建置的 frontend asset。
 
-CDN scripts 固定版本並帶 SRI。Tailwind commands：
+CDN scripts 固定版本並帶 SRI。HTMX 設定 `noSwap: [204, 304, "4xx", "5xx"]`，讓失敗的 panel request 保留原本內容，避免 JSON error 被插入畫面。Alpine 監聽 `htmx:response:error`（透過 `detail.ctx.response.status` 取得 HTTP status）與 `htmx:error`（網路、逾時或 swap 失敗），在共用 error banner 顯示訊息。這些事件與設定依據 [HTMX 4 遷移文件](https://four.htmx.org/docs/whats-new-in-htmx-4)。
+
+HTML shell 使用 `/`，局部模板使用獨立的 `/partials/*` 路由；目前沒有 boosted navigation 或 history snapshot。SSE 使用原生 `EventSource`，不需要 HTMX SSE extension。
+
+Session 操作選單的開啟狀態保存在外層 `codexConsole`，背景重新載入清單時會保留；切換 Project、Session 或 archived 篩選時關閉。Composer 草稿、model settings 與 Goal 編輯欄位也由外層管理，API 驗證失敗會保留輸入供修正。
+
+Tailwind commands：
 
 ```bash
 npm run tw:dev

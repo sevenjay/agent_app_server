@@ -5,14 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>Codex Console · Agent App Server</title>
     <meta name="description" content="在受信任工作站上管理 Codex sessions、turns 與即時執行事件">
+    <!-- Panel errors use the error banner; JSON error bodies must not replace HTML. -->
+    <meta name="htmx-config" content='{"noSwap":[204,304,"4xx","5xx"]}'>
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/tailwind.css">
 
-    <script src="https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js"
-      integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+"
+    <script src="https://unpkg.com/htmx.org@4.0.0/dist/htmx.min.js"
+      integrity="sha384-BvJpBiO8Kh31EqtJe5DRIeWrHWnCGkwytKs9NKFi86Hhw96dEqdEMzZDeK9iEGTc"
       crossorigin="anonymous"></script>
     <script src="https://unpkg.com/marked@15.0.12/marked.min.js"
       integrity="sha384-948ahk4ZmxYVYOc+rxN1H2gM1EJ2Duhp7uHtZ4WSLkV4Vtx5MUqnV+l7u9B+jFv+"
@@ -33,7 +35,8 @@
   <body
     class="h-dvh overflow-hidden bg-surface-950 font-sans text-slate-200"
     x-data="codexConsole()"
-    @htmx:response-error.window="handleHtmxError($event)"
+    @htmx:response:error.window="handleHtmxError($event)"
+    @htmx:error.window="handleHtmxError($event)"
   >
     <div class="app-shell">
       <div
@@ -105,13 +108,13 @@
                 <p class="section-kicker">Sessions</p>
                 <div class="flex items-center gap-3">
                   <label class="flex items-center gap-2 text-xs text-slate-500">
-                    <input type="checkbox" x-model="archived" @change="refreshThreads()">
+                    <input type="checkbox" x-model="archived" @change="sessionActionsThreadId = ''; refreshThreads()">
                     Show archived
                   </label>
                   <button class="icon-button" type="button" @click="newThread()" title="New session" aria-label="New session">＋</button>
                 </div>
               </div>
-              <div id="thread-list" class="mt-2">
+              <div id="thread-list" class="mt-2" @keydown.escape.window="sessionActionsThreadId = ''">
                 <p class="empty-state">Choose a project.</p>
               </div>
             </section>

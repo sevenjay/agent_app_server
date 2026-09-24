@@ -4,7 +4,7 @@ from pathlib import Path
 from jinja2 import Environment
 
 EXPECTED_CDN_DEFER = {
-    "https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js": False,
+    "https://unpkg.com/htmx.org@4.0.0/dist/htmx.min.js": False,
     "https://unpkg.com/marked@15.0.12/marked.min.js": False,
     "https://unpkg.com/dompurify@3.2.6/dist/purify.min.js": False,
     "https://unpkg.com/alpinejs@3.16.3/dist/cdn.min.js": True,
@@ -717,7 +717,9 @@ def test_session_actions_are_available_from_each_session_row() -> None:
     tailwind = Path("static/src/input.css").read_text(encoding="utf-8")
 
     assert 'aria-label="Session actions"' in thread_list
-    assert 'x-show="actionsOpen"' in thread_list
+    assert "x-show='sessionActionsThreadId === {{ thread.id|tojson }}'" in thread_list
+    assert "x-data=" not in thread_list
+    assert 'sessionActionsThreadId: ""' in javascript
     assert 'role="menu"' in thread_list
     assert 'role="menuitem"' in thread_list
     assert "Rename" in thread_list

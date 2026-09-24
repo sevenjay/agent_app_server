@@ -3,8 +3,6 @@
     <div
       class="thread-list-item"
       :class='{ "thread-list-item-active": threadId === {{ thread.id|tojson }} }'
-      x-data="{ actionsOpen: false }"
-      @keydown.escape.window="actionsOpen = false"
     >
       <button
         type="button"
@@ -24,18 +22,21 @@
         >running</span>
       </button>
 
-      <div class="session-actions" @click.outside="actionsOpen = false">
+      <div
+        class="session-actions"
+        @click.outside='if (sessionActionsThreadId === {{ thread.id|tojson }}) sessionActionsThreadId = ""'
+      >
         <button
           type="button"
           class="session-actions-trigger"
           aria-label="Session actions"
           title="Session actions"
-          :aria-expanded="actionsOpen"
-          @click.stop="actionsOpen = !actionsOpen"
+          :aria-expanded='sessionActionsThreadId === {{ thread.id|tojson }}'
+          @click.stop='sessionActionsThreadId = sessionActionsThreadId === {{ thread.id|tojson }} ? "" : {{ thread.id|tojson }}'
         >•••</button>
         <div
           x-cloak
-          x-show="actionsOpen"
+          x-show='sessionActionsThreadId === {{ thread.id|tojson }}'
           class="session-actions-menu"
           role="menu"
           aria-label="Session actions"
@@ -45,18 +46,18 @@
             <p class="session-actions-info-title">Session ID</p>
             <code class="session-actions-info-id" title="{{ thread.id }}">{{ thread.id }}</code>
           </div>
-          <button type="button" role="menuitem" @click.stop='actionsOpen = false; renameThread({{ thread.id|tojson }})'>Rename</button>
-          <button type="button" role="menuitem" @click.stop='actionsOpen = false; togglePin({{ "false" if thread.pinned else "true" }}, {{ thread.id|tojson }})'>
+          <button type="button" role="menuitem" @click.stop='sessionActionsThreadId = ""; renameThread({{ thread.id|tojson }})'>Rename</button>
+          <button type="button" role="menuitem" @click.stop='sessionActionsThreadId = ""; togglePin({{ "false" if thread.pinned else "true" }}, {{ thread.id|tojson }})'>
             {{ "Unpin" if thread.pinned else "Pin" }}
           </button>
-          <button type="button" role="menuitem" @click.stop='actionsOpen = false; forkThread({{ thread.id|tojson }})'>Fork</button>
+          <button type="button" role="menuitem" @click.stop='sessionActionsThreadId = ""; forkThread({{ thread.id|tojson }})'>Fork</button>
           {% if archived %}
-            <button type="button" role="menuitem" @click.stop='actionsOpen = false; unarchiveThread({{ thread.id|tojson }})'>Unarchive</button>
+            <button type="button" role="menuitem" @click.stop='sessionActionsThreadId = ""; unarchiveThread({{ thread.id|tojson }})'>Unarchive</button>
           {% else %}
-            <button type="button" role="menuitem" class="session-actions-danger" @click.stop='actionsOpen = false; archiveThread({{ thread.id|tojson }})'>Archive</button>
+            <button type="button" role="menuitem" class="session-actions-danger" @click.stop='sessionActionsThreadId = ""; archiveThread({{ thread.id|tojson }})'>Archive</button>
           {% endif %}
           <div class="session-actions-divider" role="separator"></div>
-          <button type="button" role="menuitem" class="session-actions-danger" @click.stop='actionsOpen = false; deleteThread({{ thread.id|tojson }})'>Delete session</button>
+          <button type="button" role="menuitem" class="session-actions-danger" @click.stop='sessionActionsThreadId = ""; deleteThread({{ thread.id|tojson }})'>Delete session</button>
         </div>
       </div>
     </div>

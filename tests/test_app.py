@@ -149,7 +149,7 @@ async def test_status_api_and_static_shell_with_codex_disabled() -> None:
         shell = await client.get("/")
         assert shell.status_code == 200
         assert "Codex Console" in shell.text
-        assert "htmx.org@2.0.4" in shell.text
+        assert "htmx.org@4.0.0" in shell.text
         assert "alpinejs@3.16.3" in shell.text
 
         runtime_status = await client.get("/partials/codex/status")
@@ -833,6 +833,16 @@ async def test_rendered_fragment_alpine_attributes_are_valid_html() -> None:
     )
     assert any(
         attrs.get("@click") == 'selectThread("thr_one")'
+        for attrs in attributes
+    )
+    assert any(
+        attrs.get("x-show") == 'sessionActionsThreadId === "thr_one"'
+        and attrs.get("role") == "menu"
+        for attrs in attributes
+    )
+    assert any(
+        attrs.get("@click.stop")
+        == 'sessionActionsThreadId = sessionActionsThreadId === "thr_one" ? "" : "thr_one"'
         for attrs in attributes
     )
     assert any(

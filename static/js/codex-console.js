@@ -45,6 +45,7 @@ window.codexConsole = function codexConsole() {
     sessionStatus: { type: "idle", activeFlags: [] },
     models: [],
     archived: false,
+    sessionActionsThreadId: "",
     draftSession: false,
     prompt: "",
     active: false,
@@ -600,6 +601,7 @@ window.codexConsole = function codexConsole() {
         return;
       }
       this.copiedProjectKey = "";
+      this.sessionActionsThreadId = "";
       this.projectKey = projectKey;
       this.resetProjectFiles(projectKey);
       this.threadId = "";
@@ -1125,6 +1127,7 @@ window.codexConsole = function codexConsole() {
 
     async selectThread(threadId) {
       this.modelSettingsOpen = false;
+      this.sessionActionsThreadId = "";
       this.draftSession = false;
       this.errorMessage = "";
       this.threadId = threadId;
@@ -2901,7 +2904,10 @@ window.codexConsole = function codexConsole() {
     },
 
     handleHtmxError(event) {
-      this.errorMessage = `A console panel failed to refresh (HTTP ${event.detail.xhr.status}).`;
+      const status = event.detail?.ctx?.response?.status;
+      this.errorMessage = event.type === "htmx:response:error" && status
+        ? `A console panel failed to refresh (HTTP ${status}).`
+        : "A console panel failed to refresh. Please try again.";
     },
 
     showError(error) {
