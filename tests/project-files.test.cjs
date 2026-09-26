@@ -46,6 +46,26 @@ test("preview URLs preserve special names and hidden folder preference", () => {
   assert.equal(params.get("show_hidden"), "true");
 });
 
+test("modified file and folder statuses link to their scoped diff in a new tab", () => {
+  const view = consoleView();
+  view.projectKey = "files_project";
+  const path = "中文 & notes/#1?.txt";
+  for (const type of ["file", "directory"]) {
+    const url = view.projectFileDiffUrl({ type, path, git_status: "modified" });
+    assert.ok(url.startsWith("/api/projects/files_project/files/diff?"));
+    assert.equal(new URLSearchParams(url.split("?")[1]).get("path"), path);
+  }
+  for (const git_status of [null, "ignored", "untracked"]) {
+    assert.equal(view.projectFileDiffUrl({ path, git_status }), null);
+  }
+  const html = readFileSync("static/index.html", "utf8");
+  const badge = html.split('class="file-git-status"')[1].split('</a>')[0];
+  assert.match(badge, /:href="projectFileDiffUrl\(entry\)"/);
+  assert.match(badge, /target="_blank"/);
+  assert.match(badge, /rel="noopener noreferrer"/);
+  assert.match(badge, /@click.stop/);
+});
+
 test("folder downloads save a ZIP without requiring a selected row", async () => {
   const link = { click() {}, remove() {} };
   const requests = [];
@@ -70,6 +90,8 @@ test("Git markers omit clean entries and describe staged or nested changes", () 
   assert.equal(view.fileGitLabel({ type: "file", git_status: "modified", git_status_code: " M" }), "Git: Modified (unstaged)");
   assert.equal(view.fileGitLabel({ type: "file", git_status: "modified", git_status_code: "MM" }), "Git: Modified (staged and unstaged)");
   assert.equal(view.fileGitLabel({ type: "directory", git_status: "deleted" }), "Git: Deleted contents");
+  assert.equal(view.fileGitLabel({ type: "directory", git_status: "ignored" }), "Git: Ignored");
+  assert.equal(view.fileGitLabel({ type: "file", git_status: "ignored", git_status_code: "!!" }), "Git: Ignored");
   assert.equal(view.fileGitMarker({ git_status: "conflicted" }), "U");
   assert.equal(view.formatFileSize(0), "0 B");
   assert.equal(view.formatFileSize(1024), "1.0 KiB");

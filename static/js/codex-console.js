@@ -994,10 +994,17 @@ window.codexConsole = function codexConsole() {
       return { modified: "M", added: "A", deleted: "D", renamed: "R", conflicted: "U", untracked: "?", ignored: "!" }[entry.git_status] || "";
     },
 
+    projectFileDiffUrl(entry) {
+      return entry.git_status === "modified"
+        ? this.projectFilesUrl("/diff", { path: entry.path })
+        : null;
+    },
+
     fileGitLabel(entry) {
       const labels = { modified: "Modified", added: "Added", deleted: "Deleted", renamed: "Renamed", conflicted: "Conflicted", untracked: "Untracked", ignored: "Ignored" };
       const label = labels[entry.git_status];
       if (!label) return "";
+      if (entry.git_status === "ignored") return `Git: ${label}`;
       if (entry.type === "directory") return `Git: ${label} contents`;
       if (entry.git_status === "conflicted") return `Git: ${label}`;
       const code = entry.git_status_code;

@@ -1577,6 +1577,47 @@
     color: oklch(0.55 0.02 250);
   }
 
+  .file-git-status[href] {
+    border-radius: 3px;
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+  }
+
+  .file-git-status[href]:hover,
+  .file-git-status[href]:focus-visible {
+    background: var(--color-surface-600);
+    outline: 1px solid currentColor;
+  }
+
+  .file-diff-link[href] {
+    color: var(--color-brand-400);
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+  }
+
+  .project-diff-section {
+    margin-top: 1.5rem;
+  }
+
+  .project-diff-section h2 {
+    color: white;
+    font-size: 1rem;
+    font-weight: 600;
+  }
+
+  .project-diff-line {
+    grid-template-columns: 4rem 4rem max-content;
+  }
+
+  .project-diff-line .diff-line-number:nth-child(2) {
+    left: 4rem;
+  }
+
+  .project-diff-view {
+    tab-size: 4;
+  }
+
   .file-info {
     align-items: start;
     background: var(--color-surface-950);
@@ -1713,7 +1754,7 @@
     padding: 0.6rem;
   }
 
-  .file-preview-directory a {
+  .file-preview-directory a:not(.file-git-status) {
     color: oklch(0.85 0.02 250);
     display: flex;
     gap: 0.5rem;
@@ -1721,7 +1762,7 @@
     min-width: 0;
   }
 
-  .file-preview-directory a:hover {
+  .file-preview-directory a:not(.file-git-status):hover {
     color: var(--color-brand-400);
     text-decoration: underline;
   }
@@ -1751,6 +1792,19 @@
     flex: none;
     font-size: 0.75rem;
     width: 0.8rem;
+  }
+
+  .file-tree-ignored .file-tree-item,
+  .file-preview-directory li[data-status="ignored"] a {
+    color: oklch(0.7 0.01 250);
+  }
+
+  .file-tree-directory.file-tree-ignored .file-tree-item {
+    color: oklch(0.78 0.01 250);
+  }
+
+  .file-tree-ignored .file-tree-icon {
+    color: oklch(0.61 0.02 250);
   }
 
   .file-tree-name {

@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ entry.name }} · Git diff</title>
+    <link rel="stylesheet" href="/static/css/tailwind.css">
+  </head>
+  <body class="file-preview-page">
+    <main class="file-preview-layout">
+      <header class="file-preview-heading">
+        <div>
+          <p class="section-kicker">{{ project_key }} · Git diff</p>
+          <h1>{{ entry.name }}</h1>
+          <code>{{ entry.path }}</code>
+        </div>
+        <nav aria-label="Diff actions">
+          <a class="button-secondary" href="">Refresh diff</a>
+          <a class="button-secondary" href="{{ preview_url }}">Preview</a>
+        </nav>
+      </header>
+      {% if not has_changes %}
+      <p class="file-preview-notice">No staged or unstaged changes for this item. It may have been committed or reverted since the file list was loaded.</p>
+      {% endif %}
+      {% for section in sections %}
+      {% if section.lines or section.truncated %}
+      <section class="project-diff-section" aria-label="{{ section.title }}">
+        <h2>{{ section.title }}</h2>
+        <p class="file-preview-notice">{{ section.baseline }}</p>
+        <dl class="diff-summary">
+          <div class="diff-summary-additions"><dt>Added</dt><dd>+{{ section.additions }}</dd></div>
+          <div class="diff-summary-deletions"><dt>Removed</dt><dd>−{{ section.deletions }}</dd></div>
+        </dl>
+        {% if section.truncated %}<p class="file-preview-notice">This diff is too large to display in full. Showing the first 2 MiB; totals apply to the displayed lines. Select an individual file to narrow the diff.</p>{% endif %}
+        <div class="diff-view project-diff-view" aria-label="{{ section.title }}: before and after">
+          <div class="diff-line project-diff-line diff-line-meta">
+            <span class="diff-line-number">Before</span><span class="diff-line-number">After</span><span class="diff-line-text">− Removed · + Added</span>
+          </div>
+          {% for line in section.lines %}
+          <div class="diff-line project-diff-line diff-line-{{ line.kind }}">
+            <span class="diff-line-number">{{ line.before if line.before is not none else '' }}</span>
+            <span class="diff-line-number">{{ line.after if line.after is not none else '' }}</span>
+            <span class="diff-line-text">{{ line.text or ' ' }}</span>
+          </div>
+          {% endfor %}
+        </div>
+      </section>
+      {% endif %}
+      {% endfor %}
+    </main>
+  </body>
+</html>

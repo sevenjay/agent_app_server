@@ -595,6 +595,32 @@ def create_app(
         )
 
     @application.get(
+        "/api/projects/{project_key}/files/diff",
+        response_class=HTMLResponse,
+        dependencies=[Depends(require_web_user)],
+    )
+    async def api_project_file_diff(
+        request: Request,
+        project_key: ProjectKey,
+        path: Annotated[str, Query(min_length=1, max_length=4096)],
+    ) -> HTMLResponse:
+        manager = project_file_manager(request, project_key)
+        diff = await asyncio.to_thread(manager.diff, path)
+        return templates.TemplateResponse(
+            request=request,
+            name="file_diff.html",
+            context={
+                **diff,
+                "project_key": project_key,
+                "preview_url": f"/api/projects/{project_key}/files/preview?" + urlencode({"path": path}),
+            },
+            headers={
+                "Cache-Control": "no-store",
+                "Content-Security-Policy": "default-src 'none'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'",
+            },
+        )
+
+    @application.get(
         "/api/projects/{project_key}/files/preview",
         response_class=HTMLResponse,
         dependencies=[Depends(require_web_user)],
@@ -619,6 +645,7 @@ def create_app(
                 **preview,
                 "project_key": project_key,
                 "preview_url": preview_url,
+                "diff_url": lambda target: base + "/diff?" + urlencode({"path": target}),
                 "parent_path": path.rpartition("/")[0],
                 "download_url": base + "/download?" + urlencode({"path": path}),
                 "content_url": base + "/preview/content?" + urlencode({"path": path}),

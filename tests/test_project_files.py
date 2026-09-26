@@ -386,6 +386,40 @@ async def test_git_status_includes_staged_unstaged_renames_ignored_and_nested_ch
     assert ignored["data"][0]["git_status"] == "ignored"
 
 
+def test_git_ignored_status_stays_on_ignored_entries_without_marking_ancestors(tmp_path: Path) -> None:
+    git(tmp_path, "init", "-b", "main")
+    (tmp_path / "src/nested").mkdir(parents=True)
+    (tmp_path / "src/clean.txt").write_text("clean")
+    (tmp_path / "src/nested/clean.txt").write_text("clean")
+    (tmp_path / ".gitignore").write_text("*.log\ncache/\n")
+    git(tmp_path, "add", ".")
+    git(tmp_path, "commit", "-m", "Initial")
+    (tmp_path / "root.log").write_text("ignored file")
+    (tmp_path / "src/debug.log").write_text("ignored file")
+    (tmp_path / "src/nested/cache/subdir").mkdir(parents=True)
+    (tmp_path / "src/nested/cache/subdir/artifact.txt").write_text("ignored contents")
+    (tmp_path / "logs").mkdir()
+    (tmp_path / "logs/only.log").write_text("ignored file in an otherwise untracked folder")
+    manager = ProjectFileManager(Project("repo", "Repo", tmp_path))
+
+    def statuses(path: str = ""):
+        return {entry["name"]: entry["git_status"] for entry in manager.list_directory(path)["data"]}
+
+    assert statuses() == {"src": None, "logs": None, "root.log": "ignored"}
+    assert statuses("src") == {"nested": None, "clean.txt": None, "debug.log": "ignored"}
+    assert statuses("src/nested") == {"cache": "ignored", "clean.txt": None}
+    assert statuses("src/nested/cache") == {"subdir": "ignored"}
+    assert statuses("src/nested/cache/subdir") == {"artifact.txt": "ignored"}
+    assert statuses("logs") == {"only.log": "ignored"}
+
+    # Real changes still propagate alongside ignored descendants.
+    (tmp_path / "src/nested/clean.txt").write_text("modified")
+    assert statuses()["src"] == "modified"
+    assert statuses("src")["nested"] == "modified"
+    (tmp_path / "logs/new.txt").write_text("untracked")
+    assert statuses()["logs"] == "untracked"
+
+
 def test_git_conflicts_worktrees_and_unavailable_git(tmp_path: Path, monkeypatch) -> None:
     repository = tmp_path / "repo"
     repository.mkdir()

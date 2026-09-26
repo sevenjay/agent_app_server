@@ -20,6 +20,7 @@ from projects import Project
 MAX_RELATIVE_PATH_BYTES = 4096
 MAX_NAME_BYTES = 255
 MAX_PREVIEW_BYTES = 1024 * 1024
+MAX_DIFF_BYTES = 2 * 1024 * 1024
 
 PREVIEW_MEDIA_TYPES = {
     "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "image/bmp", "image/x-icon",
@@ -39,6 +40,37 @@ def _git_status(codes: set[str]) -> str | None:
     if "!!" in codes:
         return "ignored"
     return None
+
+
+def _diff_lines(source: str) -> list[dict[str, Any]]:
+    """Keep Git's patch text while numbering the before/after sides of each hunk."""
+    result = []
+    before = after = None
+    for text in source.removesuffix("\n").split("\n") if source else []:
+        line = {"text": text, "kind": "meta", "before": None, "after": None}
+        hunk = re.match(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@", text)
+        if text.startswith("diff --"):
+            before = after = None
+        elif hunk:
+            before, after = map(int, hunk.groups())
+            line["kind"] = "hunk"
+        elif text.startswith("@@"):
+            # Combined conflict hunks have more than two sides; retain their raw patch.
+            before = after = None
+            line["kind"] = "hunk"
+        elif before is not None and after is not None:
+            if text.startswith("+"):
+                line.update(kind="addition", after=after)
+                after += 1
+            elif text.startswith("-"):
+                line.update(kind="deletion", before=before)
+                before += 1
+            elif text.startswith(" "):
+                line.update(kind="context", before=before, after=after)
+                before += 1
+                after += 1
+        result.append(line)
+    return result
 
 
 class ProjectFileError(RuntimeError):
@@ -89,6 +121,12 @@ class ProjectFilePermissionError(ProjectFileError):
     status_code = 403
     code = "file_permission_denied"
     safe_message = "The server does not have permission to complete this file operation."
+
+
+class ProjectGitDiffError(ProjectFileError):
+    status_code = 503
+    code = "git_diff_unavailable"
+    safe_message = "Git changes could not be read. Refresh the file list and try again."
 
 
 def _validate_name(value: str) -> str:
@@ -298,6 +336,9 @@ class ProjectFileManager:
             if not relative.parts:
                 codes.setdefault("", set()).add(code)
             elif relative.parts[0] != ".stream_journal":
+                # An ignored descendant does not make its containing folder ignored.
+                if code == "!!" and len(relative.parts) > 1:
+                    return
                 codes.setdefault(relative.parts[0], set()).add(code)
 
         records = iter(result.stdout.split(b"\0"))
@@ -311,6 +352,47 @@ class ProjectFileManager:
                 if "R" in code:
                     record(original, " D")
         return True, codes
+
+    def diff(self, relative_path: str) -> dict[str, Any]:
+        target = self._existing_path(relative_path, allow_root=False)
+        entry = self._entry(target)
+        directory = target if entry["type"] == "directory" else target.parent
+        pathspec = "." if entry["type"] == "directory" else target.name
+        command = [
+            "git", "--no-optional-locks", "--literal-pathspecs", "-c", "core.fsmonitor=false",
+            "-c", "core.quotePath=false", "-C", str(directory), "diff",
+            "--no-ext-diff", "--no-textconv", "--no-color", "--no-renames", "--no-relative",
+            "--src-prefix=a/", "--dst-prefix=b/", "--unified=3",
+        ]
+        environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+        sections = []
+        for staged, title, baseline in (
+            (False, "Unstaged changes", "Before: index (staged version) · After: working tree"),
+            (True, "Staged changes", "Before: last commit (HEAD) · After: index (staged version)"),
+        ):
+            try:
+                # Spool Git output so a large directory diff does not fill server memory.
+                with tempfile.TemporaryFile() as output:
+                    subprocess.run(
+                        [*command, *(["--cached"] if staged else []), "--", pathspec],
+                        stdout=output, stderr=subprocess.PIPE, timeout=10, check=True, env=environment,
+                    )
+                    output.seek(0)
+                    content = output.read(MAX_DIFF_BYTES + 1)
+            except (OSError, subprocess.SubprocessError) as exc:
+                raise ProjectGitDiffError from exc
+            truncated = len(content) > MAX_DIFF_BYTES
+            content = content[:MAX_DIFF_BYTES]
+            if truncated:
+                # Do not present a partial patch line as a complete change.
+                content = content.rsplit(b"\n", 1)[0]
+            lines = _diff_lines(content.decode("utf-8", errors="replace"))
+            sections.append({
+                "title": title, "baseline": baseline, "lines": lines, "truncated": truncated,
+                "additions": sum(line["kind"] == "addition" for line in lines),
+                "deletions": sum(line["kind"] == "deletion" for line in lines),
+            })
+        return {"entry": entry, "sections": sections, "has_changes": any(section["lines"] for section in sections)}
 
     def preview(self, relative_path: str, *, show_hidden: bool = False) -> dict[str, Any]:
         target = self._existing_path(relative_path)

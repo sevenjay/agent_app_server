@@ -24,12 +24,14 @@
       {% if kind == 'directory' %}
       <ul class="file-preview-directory" aria-label="Folder contents">
         {% for child in data %}
-        <li>
+        <li data-status="{{ child.git_status or '' }}">
           <a href="{{ preview_url(child.path) }}">
             <span aria-hidden="true">{{ '▰' if child.type == 'directory' else '▤' }}</span>
             <span>{{ child.name }}{{ '/' if child.type == 'directory' else '' }}</span>
           </a>
-          {% if child.git_status %}<span class="file-git-status" data-status="{{ child.git_status }}" title="Git: {{ child.git_status }}">{{ child.git_status }}</span>{% endif %}
+          {% if child.git_status == 'modified' %}
+          <a class="file-git-status" data-status="modified" href="{{ diff_url(child.path) }}" target="_blank" rel="noopener noreferrer" title="Git: Modified — View diff (opens in a new tab)">modified</a>
+          {% elif child.git_status %}<span class="file-git-status" data-status="{{ child.git_status }}" title="Git: {{ child.git_status }}">{{ child.git_status }}</span>{% endif %}
         </li>
         {% else %}<li class="files-tree-message">This folder is empty.</li>{% endfor %}
       </ul>

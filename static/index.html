@@ -417,6 +417,7 @@
                           'file-tree-directory': entry.type === 'directory',
                           'file-tree-current': entry.type === 'directory' && entry.path === fileCurrentPath,
                           'file-tree-selected': entry.path === fileSelectedPath,
+                          'file-tree-ignored': entry.git_status === 'ignored',
                         }"
                         :style="`--tree-depth: ${entry.depth}`"
                         role="treeitem"
@@ -495,14 +496,18 @@
                             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10v1"/></svg>
                           </button>
                         </div>
-                        <span
+                        <a
                           x-show="entry.git_status"
                           class="file-git-status"
                           :data-status="entry.git_status"
-                          :title="fileGitLabel(entry)"
-                          :aria-label="fileGitLabel(entry)"
+                          :href="projectFileDiffUrl(entry)"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          :title="projectFileDiffUrl(entry) ? `${fileGitLabel(entry)} — View diff (opens in a new tab)` : fileGitLabel(entry)"
+                          :aria-label="projectFileDiffUrl(entry) ? `${fileGitLabel(entry)} — View diff for ${entry.name} (opens in a new tab)` : fileGitLabel(entry)"
                           x-text="fileGitMarker(entry)"
-                        ></span>
+                          @click.stop
+                        ></a>
                         <div
                           x-cloak
                           x-show="fileInfoPath === entry.path"
@@ -514,7 +519,10 @@
                             <div><dt>Type</dt><dd x-text="entry.type === 'directory' ? 'Folder' : 'File'"></dd></div>
                             <div x-show="entry.type === 'file'"><dt>Size</dt><dd x-text="formatFileSize(entry.size)"></dd></div>
                             <div><dt>Modified</dt><dd x-text="formatFileModified(entry.modified_at)"></dd></div>
-                            <div x-show="entry.git_status"><dt>Git</dt><dd x-text="fileGitLabel(entry)"></dd></div>
+                            <div x-show="entry.git_status">
+                              <dt>Git</dt>
+                              <dd><a class="file-diff-link" :href="projectFileDiffUrl(entry)" target="_blank" rel="noopener noreferrer" :title="projectFileDiffUrl(entry) ? 'View diff (opens in a new tab)' : null" x-text="fileGitLabel(entry)" @click.stop></a></dd>
+                            </div>
                           </dl>
                           <button type="button" class="file-action" title="Close info" aria-label="Close info" @click="fileInfoPath = ''">×</button>
                         </div>
