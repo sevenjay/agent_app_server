@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ entry.name }} · File preview</title>
+    <link rel="stylesheet" href="/static/css/tailwind.css">
+  </head>
+  <body class="file-preview-page">
+    <main class="file-preview-layout">
+      <header class="file-preview-heading">
+        <div>
+          <p class="section-kicker">{{ project_key }} · {{ 'Folder' if kind == 'directory' else 'File' }} preview</p>
+          <h1>{{ entry.name }}</h1>
+          <code>{{ entry.path or '/' }}</code>
+        </div>
+        <nav aria-label="Preview actions">
+          {% if entry.path %}
+          <a class="button-secondary" href="{{ preview_url(parent_path) }}">Parent folder</a>
+          <a class="button-secondary" href="{{ download_url }}">{{ 'Download ZIP' if kind == 'directory' else 'Download' }}</a>
+          {% endif %}
+        </nav>
+      </header>
+      {% if kind == 'directory' %}
+      <ul class="file-preview-directory" aria-label="Folder contents">
+        {% for child in data %}
+        <li data-status="{{ child.git_status or '' }}">
+          <a href="{{ preview_url(child.path) }}">
+            <span aria-hidden="true">{{ '▰' if child.type == 'directory' else '▤' }}</span>
+            <span>{{ child.name }}{{ '/' if child.type == 'directory' else '' }}</span>
+          </a>
+          {% if child.git_status == 'modified' %}
+          <a class="file-git-status" data-status="modified" href="{{ diff_url(child.path) }}" target="_blank" rel="noopener noreferrer" title="Git: Modified — View diff (opens in a new tab)">modified</a>
+          {% elif child.git_status %}<span class="file-git-status" data-status="{{ child.git_status }}" title="Git: {{ child.git_status }}">{{ child.git_status }}</span>{% endif %}
+        </li>
+        {% else %}<li class="files-tree-message">This folder is empty.</li>{% endfor %}
+      </ul>
+      {% elif kind == 'text' %}
+      {% if truncated %}<p class="file-preview-notice">Showing the first 1 MiB. Download the file to see all content.</p>{% endif %}
+      <pre class="file-preview-text"><code>{{ text }}</code></pre>
+      {% elif kind == 'image' %}
+      <div class="file-preview-media"><img src="{{ content_url }}" alt="{{ entry.name }}"></div>
+      {% elif kind == 'pdf' %}
+      <iframe class="file-preview-pdf" src="{{ content_url }}" title="{{ entry.name }}"></iframe>
+      {% elif kind in ['audio', 'video'] %}
+      <div class="file-preview-media">
+        {% if kind == 'video' %}<video controls preload="metadata" src="{{ content_url }}"></video>
+        {% else %}<audio controls preload="metadata" src="{{ content_url }}"></audio>{% endif %}
+      </div>
+      <p class="file-preview-notice">If your browser cannot play this format, download the file to open it locally.</p>
+      {% else %}
+      <p class="file-preview-notice">Preview is not available for this binary file. Download it to open it locally.</p>
+      {% endif %}
+    </main>
+  </body>
+</html>

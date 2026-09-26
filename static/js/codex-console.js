@@ -31,6 +31,7 @@ window.codexConsole = function codexConsole() {
   let threadRefreshQueued = false;
 
   return {
+    projects: [],
     projectKey: "",
     copiedProjectKey: "",
     projectPathCopyTimer: null,
@@ -100,6 +101,8 @@ window.codexConsole = function codexConsole() {
     fileLoadingPaths: [],
     fileCurrentPath: "",
     fileSelectedPath: "",
+    fileActionsPath: "",
+    fileInfoPath: "",
     fileTreeLoading: false,
     fileOperationBusy: false,
     fileOperationLabel: "",
@@ -326,6 +329,10 @@ window.codexConsole = function codexConsole() {
       return Math.min(100, (this.tokenNumber(this.liveGoal?.tokensUsed) / budget) * 100);
     },
 
+    get selectedProjectPath() {
+      return this.projects.find((project) => project.key === this.projectKey)?.path || "";
+    },
+
     get visibleFileEntries() {
       const visible = [];
       const appendDirectory = (path, depth) => {
@@ -359,6 +366,7 @@ window.codexConsole = function codexConsole() {
         ]);
         this.appVersion = String(status.version || "");
         const available = projects.data || [];
+        this.projects = available;
         const preferred = preferences.selected_project_key;
         this.projectKey = available.some((item) => item.key === preferred)
           ? preferred
@@ -634,15 +642,7 @@ window.codexConsole = function codexConsole() {
       }
 
       try {
-        if (navigator.clipboard?.writeText) {
-          try {
-            await navigator.clipboard.writeText(projectPath);
-          } catch (_error) {
-            this.copyTextFallback(projectPath);
-          }
-        } else {
-          this.copyTextFallback(projectPath);
-        }
+        await this.copyText(projectPath);
       } catch (_error) {
         this.showError(new Error("Could not copy the project path."));
         return;
@@ -653,6 +653,18 @@ window.codexConsole = function codexConsole() {
       this.projectPathCopyTimer = window.setTimeout(() => {
         if (this.copiedProjectKey === projectKey) this.copiedProjectKey = "";
       }, 1500);
+    },
+
+    async copyText(value) {
+      if (navigator.clipboard?.writeText) {
+        try {
+          await navigator.clipboard.writeText(value);
+          return;
+        } catch (_error) {
+          // Fall back when clipboard access is unavailable or denied.
+        }
+      }
+      this.copyTextFallback(value);
     },
 
     copyTextFallback(value) {
@@ -701,10 +713,39 @@ window.codexConsole = function codexConsole() {
       this.fileLoadingPaths = [];
       this.fileCurrentPath = "";
       this.fileSelectedPath = "";
+      this.fileActionsPath = "";
+      this.fileInfoPath = "";
       this.fileTreeLoading = false;
       this.fileOperationBusy = false;
       this.fileOperationLabel = "";
       this.fileError = "";
+    },
+
+    async toggleFileActions(entry, button) {
+      if (this.fileActionsPath === entry.path) {
+        this.fileActionsPath = "";
+        return;
+      }
+      const menu = button.nextElementSibling;
+      menu.style.visibility = "hidden";
+      this.fileActionsPath = entry.path;
+      await this.$nextTick();
+      menu.style.removeProperty("visibility");
+      if (this.fileActionsPath !== entry.path || !button.isConnected) return;
+
+      const anchor = button.getBoundingClientRect();
+      const bounds = menu.getBoundingClientRect();
+      const margin = 8;
+      const gap = 4;
+      const left = Math.max(margin, Math.min(
+        anchor.right - bounds.width,
+        document.documentElement.clientWidth - bounds.width - margin,
+      ));
+      const top = anchor.bottom + gap + bounds.height <= window.innerHeight - margin
+        ? anchor.bottom + gap
+        : Math.max(margin, anchor.top - bounds.height - gap);
+      menu.style.setProperty("--file-menu-left", `${left}px`);
+      menu.style.setProperty("--file-menu-top", `${top}px`);
     },
 
     async openFilesTab() {
@@ -775,6 +816,8 @@ window.codexConsole = function codexConsole() {
       const requestedSelected = options.selectedPath ?? this.fileSelectedPath;
       this.fileError = "";
       this.fileTreeLoading = true;
+      this.fileActionsPath = "";
+      this.fileInfoPath = "";
       this.fileDirectories = {};
       this.fileExpandedPaths = [];
       try {
@@ -914,7 +957,7 @@ window.codexConsole = function codexConsole() {
           method: "POST",
           body: JSON.stringify({ path: parent, name }),
         });
-        await this.loadFileDirectory(parent);
+        await this.reloadFileAncestors(parent);
         this.fileOperationLabel = `Created folder ${name}.`;
       } catch (error) {
         this.fileOperationLabel = "Folder creation failed.";
@@ -970,7 +1013,7 @@ window.codexConsole = function codexConsole() {
         this.showFileError(error);
       } finally {
         try {
-          await this.loadFileDirectory(parent);
+          await this.reloadFileAncestors(parent);
         } catch (error) {
           this.showFileError(error);
         }
@@ -978,10 +1021,71 @@ window.codexConsole = function codexConsole() {
       }
     },
 
+    async reloadFileAncestors(path) {
+      const projectKey = this.projectKey;
+      while (this.projectKey === projectKey) {
+        await this.loadFileDirectory(path);
+        if (!path) break;
+        path = this.fileParentPath(path);
+      }
+    },
+
+    fileGitMarker(entry) {
+      return { modified: "M", added: "A", deleted: "D", renamed: "R", conflicted: "U", untracked: "?", ignored: "!" }[entry.git_status] || "";
+    },
+
+    projectFileDiffUrl(entry) {
+      return entry.git_status === "modified"
+        ? this.projectFilesUrl("/diff", { path: entry.path })
+        : null;
+    },
+
+    fileGitLabel(entry) {
+      const labels = { modified: "Modified", added: "Added", deleted: "Deleted", renamed: "Renamed", conflicted: "Conflicted", untracked: "Untracked", ignored: "Ignored" };
+      const label = labels[entry.git_status];
+      if (!label) return "";
+      if (entry.git_status === "ignored") return `Git: ${label}`;
+      if (entry.type === "directory") return `Git: ${label} contents`;
+      if (entry.git_status === "conflicted") return `Git: ${label}`;
+      const code = entry.git_status_code;
+      const state = !code || code === "??" || code === "!!" ? ""
+        : code[0] !== " " && code[1] !== " " ? " (staged and unstaged)"
+        : code[0] !== " " ? " (staged)" : " (unstaged)";
+      return `Git: ${label}${state}`;
+    },
+
+    formatFileSize(size) {
+      if (size === null || size === undefined) return "—";
+      if (size < 1024) return `${size} B`;
+      const unit = Math.min(Math.floor(Math.log(size) / Math.log(1024)), 4);
+      return `${(size / (1024 ** unit)).toFixed(1)} ${["B", "KiB", "MiB", "GiB", "TiB"][unit]}`;
+    },
+
+    formatFileModified(value) {
+      if (value === null || value === undefined) return "—";
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString();
+    },
+
+    async copyProjectFilePath(entry) {
+      if (!entry || !this.projectKey || this.fileOperationBusy) return;
+      const projectKey = this.projectKey;
+      this.fileError = "";
+      try {
+        await this.copyText(entry.path);
+        if (this.projectKey === projectKey && !this.fileOperationBusy) {
+          this.fileOperationLabel = `Copied path: ${entry.path}`;
+        }
+      } catch (_error) {
+        if (this.projectKey === projectKey) {
+          this.showFileError(new Error("Could not copy the file path."));
+        }
+      }
+    },
+
     async downloadProjectFile(entry = this.selectedFileEntry) {
       if (
         !entry ||
-        entry.type !== "file" ||
         !this.projectKey ||
         this.fileOperationBusy
       ) return;
@@ -1005,7 +1109,7 @@ window.codexConsole = function codexConsole() {
         const objectUrl = URL.createObjectURL(await response.blob());
         const link = document.createElement("a");
         link.href = objectUrl;
-        link.download = entry.name;
+        link.download = entry.type === "directory" ? `${entry.name}.zip` : entry.name;
         document.body.append(link);
         link.click();
         link.remove();
@@ -1275,6 +1379,7 @@ window.codexConsole = function codexConsole() {
           method: "POST",
           body: JSON.stringify({ name }),
         });
+        this.projects = [...this.projects, project];
         await this.refreshProjects();
         await this.selectProject(project.key);
         await this.newThread();

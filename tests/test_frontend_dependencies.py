@@ -274,11 +274,11 @@ def test_files_tab_provides_lazy_tree_and_guarded_file_operations() -> None:
     assert ">Refresh</button>" in html
     assert 'x-for="entry in visibleFileEntries"' in html
     assert 'selectAndToggleFileFolder(entry)' in html
-    assert 'class="files-selection"' in html
+    assert 'class="files-selection"' not in html
     assert 'entry.path === fileSelectedPath' in html
     assert 'selectProjectFile(entry)' in html
-    assert 'class="file-tree-actions"' not in html
-    assert '>Download</button>' in html
+    assert 'class="file-tree-actions"' in html
+    assert '@click.stop="downloadProjectFile(entry)"' in html
     assert ':disabled="fileOperationBusy"' in html
     assert "async loadFileDirectory(path)" in javascript
     assert "fileShowHidden: false" in javascript
@@ -287,7 +287,7 @@ def test_files_tab_provides_lazy_tree_and_guarded_file_operations() -> None:
     assert "async uploadProjectFiles(event)" in javascript
     assert "async downloadProjectFile(entry = this.selectedFileEntry)" in javascript
     assert 'this.projectFilesUrl("/download", { path: entry.path })' in javascript
-    assert 'link.download = entry.name;' in javascript
+    assert 'link.download = entry.type === "directory" ? `${entry.name}.zip` : entry.name;' in javascript
     assert 'error.code !== "file_exists"' in javascript
     assert "async newProjectFolder()" in javascript
     assert "async renameProjectFile(entry)" in javascript

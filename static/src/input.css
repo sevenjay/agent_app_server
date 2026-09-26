@@ -1385,16 +1385,11 @@
     align-items: center;
     border-bottom: 1px solid var(--color-surface-700);
     display: flex;
+    flex-wrap: wrap;
     gap: 0.45rem;
     min-height: 2.25rem;
     min-width: 0;
     padding: 0.35rem 0.65rem;
-  }
-
-  .files-location > span {
-    color: oklch(0.55 0.02 250);
-    flex: none;
-    font-size: 0.68rem;
   }
 
   .files-location button {
@@ -1403,7 +1398,12 @@
     flex: none;
     font-size: 0.72rem;
     font-weight: 600;
+    max-width: 100%;
+    min-width: 0;
+    overflow-wrap: anywhere;
     padding: 0.3rem 0.4rem;
+    text-align: left;
+    white-space: pre-wrap;
   }
 
   .files-location button:hover,
@@ -1416,55 +1416,8 @@
     font-family: var(--font-mono);
     font-size: 0.7rem;
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .files-selection {
-    align-items: center;
-    background: color-mix(in oklab, var(--color-brand-500) 8%, var(--color-surface-900));
-    border-bottom: 1px solid var(--color-surface-700);
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.75rem 1rem;
-    justify-content: space-between;
-    padding: 0.45rem 0.65rem;
-  }
-
-  .files-selection-target {
-    align-items: center;
-    display: flex;
-    gap: 0.55rem;
-    min-width: 0;
-  }
-
-  .files-selection-target strong,
-  .files-selection-target code {
-    display: block;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .files-selection-target strong {
-    color: oklch(0.9 0.02 250);
-    font-size: 0.76rem;
-    font-weight: 600;
-  }
-
-  .files-selection-target code {
-    color: oklch(0.56 0.02 250);
-    font-family: var(--font-mono);
-    font-size: 0.64rem;
-    margin-top: 0.1rem;
-  }
-
-  .files-selection-actions {
-    display: flex;
-    flex: none;
-    gap: 0.4rem;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
   }
 
   .files-error {
@@ -1497,12 +1450,16 @@
   }
 
   .file-tree-row {
-    display: block;
-    min-width: max-content;
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    min-width: calc(17rem + var(--tree-depth, 0) * 0.95rem);
     padding-left: calc(0.3rem + var(--tree-depth, 0) * 0.95rem);
+    padding-right: 0.5rem;
   }
 
   .file-tree-row:hover,
+  .file-tree-row:focus-within,
   .file-tree-current,
   .file-tree-selected {
     background: var(--color-surface-800);
@@ -1529,7 +1486,353 @@
 
   .file-tree-item {
     cursor: pointer;
+    flex: 0 1 auto;
+    max-width: calc(100% - 13rem);
+  }
+
+  .file-tree-actions {
+    align-items: center;
+    display: flex;
+    flex: none;
+    gap: 0.1rem;
+    margin-left: 0.35rem;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 100ms;
+  }
+
+  .file-tree-action-group {
+    display: contents;
+  }
+
+  .file-tree-action-toggle {
+    align-items: center;
+    border-radius: 3px;
+    color: oklch(0.66 0.02 250);
+    display: none;
+    flex: none;
+    height: 1.75rem;
+    justify-content: center;
+    margin-left: 0.35rem;
+    width: 1.75rem;
+  }
+
+  .file-tree-action-toggle svg {
+    fill: currentColor;
+    height: 1rem;
+    width: 1rem;
+  }
+
+  .file-tree-action-toggle:hover,
+  .file-tree-action-toggle:focus-visible,
+  .file-tree-action-toggle[aria-expanded="true"] {
+    background: var(--color-surface-600);
+    color: white;
+  }
+
+  .file-tree-row:hover .file-tree-actions,
+  .file-tree-row:focus-within .file-tree-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .file-action {
+    align-items: center;
+    border-radius: 3px;
+    color: oklch(0.66 0.02 250);
+    cursor: pointer;
+    display: inline-flex;
+    flex: none;
+    height: 1.75rem;
+    justify-content: center;
+    width: 1.75rem;
+  }
+
+  .file-action svg {
+    fill: none;
+    height: 0.95rem;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.7;
+    width: 0.95rem;
+  }
+
+  .file-action-label {
+    display: none;
+  }
+
+  .file-action:hover,
+  .file-action[aria-expanded="true"] {
+    background: var(--color-surface-600);
+    color: white;
+  }
+
+  .file-action-danger:hover {
+    background: oklch(0.3 0.09 25);
+    color: oklch(0.8 0.13 25);
+  }
+
+  .file-action:focus-visible,
+  .file-tree-item:focus-visible {
+    outline: 2px solid var(--color-brand-400);
+    outline-offset: -2px;
+  }
+
+  .file-action:disabled {
+    cursor: not-allowed;
+    opacity: 0.4;
+  }
+
+  .file-git-status {
+    color: oklch(0.82 0.12 80);
+    flex: none;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 600;
+    margin-left: auto;
+    padding: 0.2rem 0.35rem;
+    text-align: right;
+  }
+
+  .file-git-status[data-status="added"],
+  .file-git-status[data-status="untracked"] {
+    color: var(--color-signal-400);
+  }
+
+  .file-git-status[data-status="deleted"],
+  .file-git-status[data-status="conflicted"] {
+    color: oklch(0.78 0.14 25);
+  }
+
+  .file-git-status[data-status="ignored"] {
+    color: oklch(0.55 0.02 250);
+  }
+
+  .file-git-status[href] {
+    border-radius: 3px;
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+  }
+
+  .file-git-status[href]:hover,
+  .file-git-status[href]:focus-visible {
+    background: var(--color-surface-600);
+    outline: 1px solid currentColor;
+  }
+
+  .file-diff-link[href] {
+    color: var(--color-brand-400);
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+  }
+
+  .project-diff-section {
+    margin-top: 1.5rem;
+  }
+
+  .project-diff-section h2 {
+    color: white;
+    font-size: 1rem;
+    font-weight: 600;
+  }
+
+  .project-diff-line {
+    grid-template-columns: 4rem 4rem max-content;
+  }
+
+  .project-diff-line .diff-line-number:nth-child(2) {
+    left: 4rem;
+  }
+
+  .project-diff-view {
+    tab-size: 4;
+  }
+
+  .file-info {
+    align-items: start;
+    background: var(--color-surface-950);
+    border: 1px solid var(--color-surface-700);
+    border-radius: 4px;
+    display: flex;
+    flex: 0 0 100%;
+    gap: 0.5rem;
+    margin: 0.25rem 0 0.5rem;
+    padding: 0.55rem;
+  }
+
+  .file-info dl {
+    flex: 1;
+    font-size: 0.7rem;
+    min-width: 0;
+  }
+
+  .file-info dl > div {
+    display: grid;
+    gap: 0.5rem;
+    grid-template-columns: 4rem minmax(0, 1fr);
+    padding: 0.15rem 0;
+  }
+
+  .file-info dt {
+    color: oklch(0.6 0.02 250);
+  }
+
+  .file-info dd {
+    color: oklch(0.85 0.02 250);
+    overflow-wrap: anywhere;
+  }
+
+  @media (max-width: 767px), (hover: none), (pointer: coarse) {
+    .file-tree-action-toggle {
+      display: inline-flex;
+      height: 2.25rem;
+      width: 2rem;
+    }
+
+    .file-tree-actions {
+      background: var(--color-surface-950);
+      border: 1px solid var(--color-surface-600);
+      border-radius: 4px;
+      box-shadow: 0 0.75rem 1.75rem oklch(0.08 0.01 250 / 65%);
+      display: none;
+      flex-direction: column;
+      gap: 0.15rem;
+      margin: 0;
+      min-width: min(10rem, calc(100vw - 1rem));
+      max-width: calc(100vw - 1rem);
+      max-height: calc(100dvh - 1rem);
+      opacity: 1;
+      overflow-y: auto;
+      padding: 0.25rem;
+      pointer-events: auto;
+      /* Escape the file tree's scroll clipping and stay above adjacent panels. */
+      position: fixed;
+      left: var(--file-menu-left, 0);
+      top: var(--file-menu-top, 0);
+      z-index: 1000;
+    }
+
+    .file-tree-actions-open {
+      display: flex;
+    }
+
+    .file-tree-actions .file-action {
+      justify-content: flex-start;
+      gap: 0.6rem;
+      height: 2.25rem;
+      padding: 0 0.55rem;
+      width: 100%;
+    }
+
+    .file-action-label {
+      display: inline;
+      font-size: 0.74rem;
+    }
+
+    .file-tree-item {
+      max-width: calc(100% - 2.75rem);
+      min-height: 2.5rem;
+    }
+  }
+
+  .file-preview-page {
+    background: var(--color-surface-950);
+    color: oklch(0.85 0.02 250);
+    font-family: var(--font-sans);
+    min-height: 100vh;
+    padding: 1.5rem;
+  }
+
+  .file-preview-layout {
+    margin: 0 auto;
+    max-width: 90rem;
+  }
+
+  .file-preview-heading {
+    align-items: start;
+    border-bottom: 1px solid var(--color-surface-700);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    justify-content: space-between;
+    margin-bottom: 1rem;
+    padding-bottom: 1rem;
+  }
+
+  .file-preview-heading h1 {
+    color: white;
+    font-size: 1.25rem;
+    margin: 0.5rem 0;
+    overflow-wrap: anywhere;
+  }
+
+  .file-preview-heading code {
+    font-size: 0.75rem;
+    overflow-wrap: anywhere;
+  }
+
+  .file-preview-heading nav {
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  .file-preview-text {
+    background: var(--color-surface-900);
+    border: 1px solid var(--color-surface-700);
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    line-height: 1.6;
+    overflow-x: auto;
+    padding: 1rem;
+    tab-size: 4;
+  }
+
+  .file-preview-media {
+    display: flex;
+    justify-content: center;
+    padding: 1rem;
+  }
+
+  .file-preview-media img,
+  .file-preview-media video {
+    max-height: 80vh;
+    max-width: 100%;
+    object-fit: contain;
+  }
+
+  .file-preview-pdf {
+    height: 80vh;
     width: 100%;
+  }
+
+  .file-preview-notice {
+    color: oklch(0.7 0.02 250);
+    font-size: 0.85rem;
+    margin: 1rem 0;
+  }
+
+  .file-preview-directory li {
+    align-items: center;
+    border-bottom: 1px solid var(--color-surface-700);
+    display: flex;
+    gap: 1rem;
+    padding: 0.6rem;
+  }
+
+  .file-preview-directory a:not(.file-git-status) {
+    color: oklch(0.85 0.02 250);
+    display: flex;
+    gap: 0.5rem;
+    overflow-wrap: anywhere;
+    min-width: 0;
+  }
+
+  .file-preview-directory a:not(.file-git-status):hover {
+    color: var(--color-brand-400);
+    text-decoration: underline;
   }
 
   .file-tree-directory .file-tree-item {
@@ -1557,6 +1860,19 @@
     flex: none;
     font-size: 0.75rem;
     width: 0.8rem;
+  }
+
+  .file-tree-ignored .file-tree-item,
+  .file-preview-directory li[data-status="ignored"] a {
+    color: oklch(0.7 0.01 250);
+  }
+
+  .file-tree-directory.file-tree-ignored .file-tree-item {
+    color: oklch(0.78 0.01 250);
+  }
+
+  .file-tree-ignored .file-tree-icon {
+    color: oklch(0.61 0.02 250);
   }
 
   .file-tree-name {
