@@ -269,7 +269,6 @@ def test_files_tab_provides_lazy_tree_and_guarded_file_operations() -> None:
     assert html.index("Live changes") < html.index("Files", files_tab_start)
     assert 'x-model="fileShowHidden"' in html
     assert '@change="refreshProjectFiles()"' in html
-    assert "Upload files" in html
     assert "New folder" in html
     assert ">Refresh</button>" in html
     assert 'x-for="entry in visibleFileEntries"' in html
@@ -278,7 +277,7 @@ def test_files_tab_provides_lazy_tree_and_guarded_file_operations() -> None:
     assert 'entry.path === fileSelectedPath' in html
     assert 'selectProjectFile(entry)' in html
     assert 'class="file-tree-actions"' in html
-    assert '@click.stop="downloadProjectFile(entry)"' in html
+    assert '@click.stop="fileActionsPath = \'\'; downloadProjectFile(entry)"' in html
     assert ':disabled="fileOperationBusy"' in html
     assert "async loadFileDirectory(path)" in javascript
     assert "fileShowHidden: false" in javascript

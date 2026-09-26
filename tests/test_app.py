@@ -453,7 +453,7 @@ async def test_project_root_discovery_creation_and_new_session(
         assert "project1" in partial.text
         assert "project2" in partial.text
         assert "private" not in partial.text
-        assert str((root / "project2").resolve()) in partial.text
+        assert str((root / "project2").resolve()) not in partial.text
 
         session = await client.post(
             "/api/codex/threads",

@@ -33,8 +33,6 @@ window.codexConsole = function codexConsole() {
   return {
     projects: [],
     projectKey: "",
-    copiedProjectKey: "",
-    projectPathCopyTimer: null,
     threadId: "",
     appVersion: "",
     model: "",
@@ -100,6 +98,8 @@ window.codexConsole = function codexConsole() {
     fileExpandedPaths: [],
     fileLoadingPaths: [],
     fileCurrentPath: "",
+    copiedFileLocationPath: "",
+    fileLocationCopyTimer: null,
     fileSelectedPath: "",
     fileActionsPath: "",
     fileInfoPath: "",
@@ -331,6 +331,16 @@ window.codexConsole = function codexConsole() {
 
     get selectedProjectPath() {
       return this.projects.find((project) => project.key === this.projectKey)?.path || "";
+    },
+
+    get fileLocationPath() {
+      const root = this.selectedProjectPath;
+      if (!root || !this.fileCurrentPath) return root;
+      return `${root.replace(/\/+$/, "")}/${this.fileCurrentPath}`;
+    },
+
+    get fileLocationCopied() {
+      return Boolean(this.fileLocationPath && this.copiedFileLocationPath === this.fileLocationPath);
     },
 
     get visibleFileEntries() {
@@ -608,15 +618,11 @@ window.codexConsole = function codexConsole() {
 
     async selectProject(projectKey) {
       if (this.composerSubmitting) return;
-      if (this.projectKey === projectKey) {
-        await this.copyProjectPath(projectKey);
-        return;
-      }
+      if (this.projectKey === projectKey) return;
       if (this.fileOperationBusy) {
         this.showFileError(new Error("Wait for the current file operation to finish."));
         return;
       }
-      this.copiedProjectKey = "";
       this.sessionActionsThreadId = "";
       this.projectKey = projectKey;
       this.resetProjectFiles(projectKey);
@@ -629,30 +635,6 @@ window.codexConsole = function codexConsole() {
         selected_thread_id: null,
       }).catch(() => {});
       await this.refreshThreads();
-    },
-
-    async copyProjectPath(projectKey) {
-      const projectButton = [...document.querySelectorAll(
-        "#project-selector [data-project-key]",
-      )].find((element) => element.dataset.projectKey === String(projectKey));
-      const projectPath = projectButton?.dataset.projectPath || "";
-      if (!projectPath) {
-        this.showError(new Error("The project path is unavailable."));
-        return;
-      }
-
-      try {
-        await this.copyText(projectPath);
-      } catch (_error) {
-        this.showError(new Error("Could not copy the project path."));
-        return;
-      }
-
-      this.copiedProjectKey = projectKey;
-      window.clearTimeout(this.projectPathCopyTimer);
-      this.projectPathCopyTimer = window.setTimeout(() => {
-        if (this.copiedProjectKey === projectKey) this.copiedProjectKey = "";
-      }, 1500);
     },
 
     async copyText(value) {
@@ -707,6 +689,8 @@ window.codexConsole = function codexConsole() {
     },
 
     resetProjectFiles(projectKey = "") {
+      window.clearTimeout(this.fileLocationCopyTimer);
+      this.copiedFileLocationPath = "";
       this.filesProjectKey = projectKey;
       this.fileDirectories = {};
       this.fileExpandedPaths = [];
@@ -917,6 +901,27 @@ window.codexConsole = function codexConsole() {
 
     selectFileRoot() {
       this.fileCurrentPath = "";
+    },
+
+    async copyFileLocation() {
+      const path = this.fileLocationPath;
+      const projectKey = this.projectKey;
+      if (!path) return;
+      window.clearTimeout(this.fileLocationCopyTimer);
+      this.copiedFileLocationPath = "";
+      this.fileError = "";
+      try {
+        await this.copyText(path);
+        if (this.projectKey !== projectKey || this.fileLocationPath !== path) return;
+        this.copiedFileLocationPath = path;
+        this.fileLocationCopyTimer = window.setTimeout(() => {
+          this.copiedFileLocationPath = "";
+        }, 1500);
+      } catch (_error) {
+        if (this.projectKey === projectKey && this.fileLocationPath === path) {
+          this.showFileError(new Error("Could not copy the folder path."));
+        }
+      }
     },
 
     validateProjectFileName(value) {
@@ -2158,6 +2163,7 @@ window.codexConsole = function codexConsole() {
     },
 
     destroy() {
+      window.clearTimeout(this.fileLocationCopyTimer);
       this.clearAttachmentDraft();
       this.composerResizeObserver?.disconnect();
       this.closeEvents();

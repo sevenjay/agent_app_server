@@ -360,7 +360,7 @@
                     class="button-secondary"
                     :disabled="fileOperationBusy"
                     @click="$refs.fileUploadInput.click()"
-                  >Upload files</button>
+                  >Upload</button>
                   <button
                     type="button"
                     class="button-secondary"
@@ -386,12 +386,38 @@
                   <div class="files-location">
                     <button
                       type="button"
-                      :class="{ 'files-location-active': fileCurrentPath === '' }"
-                      :title="selectedProjectPath"
-                      x-text="selectedProjectPath"
+                      class="files-location-copy"
+                      :class="{ 'files-location-copied': fileLocationCopied }"
+                      :title="`Copy full path: ${fileLocationPath}`"
+                      :aria-label="`Copy full folder path: ${fileLocationPath}`"
+                      :disabled="!fileLocationPath"
+                      @click="copyFileLocation()"
+                    >
+                      <code class="files-location-text" x-text="fileLocationPath"></code>
+                      <span class="files-location-action" aria-hidden="true">
+                        <svg x-show="!fileLocationCopied" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                          <rect x="8" y="8" width="12" height="12" rx="2"/>
+                          <path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/>
+                        </svg>
+                        <svg x-show="fileLocationCopied" x-cloak viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                          <path d="m5 12 4 4L19 6" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                        <span x-text="fileLocationCopied ? 'Copied' : 'Copy'"></span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      class="files-location-root"
+                      :disabled="!fileCurrentPath"
+                      title="Go to project root"
+                      aria-label="Go to project root"
                       @click="selectFileRoot()"
-                    ></button>
-                    <code x-show="fileCurrentPath" x-text="`/ ${fileCurrentPath}`"></code>
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                        <path d="M4 4h16M12 20V8m-5 5 5-5 5 5" stroke-linecap="round" stroke-linejoin="round"/>
+                      </svg>
+                    </button>
+                    <span class="sr-only" role="status" x-text="fileLocationCopied ? 'Folder path copied to clipboard.' : ''"></span>
                   </div>
 
                   <div
