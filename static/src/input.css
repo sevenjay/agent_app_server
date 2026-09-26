@@ -1385,16 +1385,11 @@
     align-items: center;
     border-bottom: 1px solid var(--color-surface-700);
     display: flex;
+    flex-wrap: wrap;
     gap: 0.45rem;
     min-height: 2.25rem;
     min-width: 0;
     padding: 0.35rem 0.65rem;
-  }
-
-  .files-location > span {
-    color: oklch(0.55 0.02 250);
-    flex: none;
-    font-size: 0.68rem;
   }
 
   .files-location button {
@@ -1403,7 +1398,12 @@
     flex: none;
     font-size: 0.72rem;
     font-weight: 600;
+    max-width: 100%;
+    min-width: 0;
+    overflow-wrap: anywhere;
     padding: 0.3rem 0.4rem;
+    text-align: left;
+    white-space: pre-wrap;
   }
 
   .files-location button:hover,
@@ -1416,9 +1416,8 @@
     font-family: var(--font-mono);
     font-size: 0.7rem;
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
   }
 
   .files-error {
@@ -1488,7 +1487,7 @@
   .file-tree-item {
     cursor: pointer;
     flex: 0 1 auto;
-    max-width: calc(100% - 11rem);
+    max-width: calc(100% - 13rem);
   }
 
   .file-tree-actions {

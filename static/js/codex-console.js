@@ -31,6 +31,7 @@ window.codexConsole = function codexConsole() {
   let threadRefreshQueued = false;
 
   return {
+    projects: [],
     projectKey: "",
     copiedProjectKey: "",
     projectPathCopyTimer: null,
@@ -328,6 +329,10 @@ window.codexConsole = function codexConsole() {
       return Math.min(100, (this.tokenNumber(this.liveGoal?.tokensUsed) / budget) * 100);
     },
 
+    get selectedProjectPath() {
+      return this.projects.find((project) => project.key === this.projectKey)?.path || "";
+    },
+
     get visibleFileEntries() {
       const visible = [];
       const appendDirectory = (path, depth) => {
@@ -361,6 +366,7 @@ window.codexConsole = function codexConsole() {
         ]);
         this.appVersion = String(status.version || "");
         const available = projects.data || [];
+        this.projects = available;
         const preferred = preferences.selected_project_key;
         this.projectKey = available.some((item) => item.key === preferred)
           ? preferred
@@ -636,15 +642,7 @@ window.codexConsole = function codexConsole() {
       }
 
       try {
-        if (navigator.clipboard?.writeText) {
-          try {
-            await navigator.clipboard.writeText(projectPath);
-          } catch (_error) {
-            this.copyTextFallback(projectPath);
-          }
-        } else {
-          this.copyTextFallback(projectPath);
-        }
+        await this.copyText(projectPath);
       } catch (_error) {
         this.showError(new Error("Could not copy the project path."));
         return;
@@ -655,6 +653,18 @@ window.codexConsole = function codexConsole() {
       this.projectPathCopyTimer = window.setTimeout(() => {
         if (this.copiedProjectKey === projectKey) this.copiedProjectKey = "";
       }, 1500);
+    },
+
+    async copyText(value) {
+      if (navigator.clipboard?.writeText) {
+        try {
+          await navigator.clipboard.writeText(value);
+          return;
+        } catch (_error) {
+          // Fall back when clipboard access is unavailable or denied.
+        }
+      }
+      this.copyTextFallback(value);
     },
 
     copyTextFallback(value) {
@@ -1057,6 +1067,22 @@ window.codexConsole = function codexConsole() {
       return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString();
     },
 
+    async copyProjectFilePath(entry) {
+      if (!entry || !this.projectKey || this.fileOperationBusy) return;
+      const projectKey = this.projectKey;
+      this.fileError = "";
+      try {
+        await this.copyText(entry.path);
+        if (this.projectKey === projectKey && !this.fileOperationBusy) {
+          this.fileOperationLabel = `Copied path: ${entry.path}`;
+        }
+      } catch (_error) {
+        if (this.projectKey === projectKey) {
+          this.showFileError(new Error("Could not copy the file path."));
+        }
+      }
+    },
+
     async downloadProjectFile(entry = this.selectedFileEntry) {
       if (
         !entry ||
@@ -1353,6 +1379,7 @@ window.codexConsole = function codexConsole() {
           method: "POST",
           body: JSON.stringify({ name }),
         });
+        this.projects = [...this.projects, project];
         await this.refreshProjects();
         await this.selectProject(project.key);
         await this.newThread();

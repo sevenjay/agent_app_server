@@ -18,21 +18,24 @@ test("row actions target the hovered entry without changing the current selectio
   view.projectKey = "project";
   view.fileSelectedPath = "selected.txt";
   const entry = { path: "hovered/folder", name: "folder", type: "directory" };
-  for (const method of ["downloadProjectFile", "renameProjectFile", "deleteProjectFile"]) {
+  for (const method of ["downloadProjectFile", "renameProjectFile", "deleteProjectFile", "copyProjectFilePath"]) {
     view[method] = value => calls.push([method, value.path]);
   }
   for (const handler of handlers) vm.runInNewContext(`with (view) { ${handler} }`, { view, entry });
   assert.deepEqual(calls, [
     ["downloadProjectFile", "hovered/folder"], ["renameProjectFile", "hovered/folder"], ["deleteProjectFile", "hovered/folder"],
+    ["copyProjectFilePath", "hovered/folder"],
   ]);
   assert.equal(view.fileSelectedPath, "selected.txt");
   assert.equal(view.fileInfoPath, "hovered/folder");
-  vm.runInNewContext(`with (view) { ${handlers.at(-1)} }`, { view, entry });
+  const infoHandler = handlers.find(handler => handler.includes("fileInfoPath ="));
+  vm.runInNewContext(`with (view) { ${infoHandler} }`, { view, entry });
   assert.equal(view.fileInfoPath, "");
   assert.ok(actions.indexOf('title="Preview"') < actions.indexOf("'Download'"));
   assert.ok(actions.indexOf("'Download'") < actions.indexOf('title="Rename"'));
   assert.ok(actions.indexOf('title="Rename"') < actions.indexOf('title="Delete"'));
   assert.ok(actions.indexOf('title="Delete"') < actions.indexOf('title="Info"'));
+  assert.ok(actions.indexOf('title="Info"') < actions.indexOf('title="Copy path"'));
   assert.match(actions, /target="_blank"/);
   assert.match(actions, /rel="noopener noreferrer"/);
 });

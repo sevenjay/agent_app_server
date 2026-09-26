@@ -384,12 +384,13 @@
               <template x-if="projectKey">
                 <section class="files-browser" aria-label="Project file browser">
                   <div class="files-location">
-                    <span>Current folder</span>
                     <button
                       type="button"
                       :class="{ 'files-location-active': fileCurrentPath === '' }"
+                      :title="selectedProjectPath"
+                      x-text="selectedProjectPath"
                       @click="selectFileRoot()"
-                    >Project root</button>
+                    ></button>
                     <code x-show="fileCurrentPath" x-text="`/ ${fileCurrentPath}`"></code>
                   </div>
 
@@ -521,6 +522,17 @@
                             >
                               <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10v1"/></svg>
                               <span class="file-action-label">Info</span>
+                            </button>
+                            <button
+                              type="button"
+                              class="file-action"
+                              title="Copy path"
+                              :aria-label="`Copy relative path for ${entry.name}`"
+                              :disabled="fileOperationBusy"
+                              @click.stop="fileActionsPath = ''; copyProjectFilePath(entry)"
+                            >
+                              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V4H4v12h4"/></svg>
+                              <span class="file-action-label">Copy path</span>
                             </button>
                           </div>
                         </div>
