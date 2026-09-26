@@ -324,6 +324,8 @@
             id="project-files"
             x-cloak
             x-show="conversationTab === 'files'"
+            @resize.window="fileActionsPath = ''"
+            @scroll.window.capture="if (!$event.target.closest?.('.file-tree-actions')) fileActionsPath = ''"
             class="pretty-scrollbar min-h-0 min-w-0 flex-1 overflow-y-auto px-3 py-3 sm:px-4"
             role="tabpanel"
             aria-labelledby="conversation-tab-files"
@@ -423,12 +425,13 @@
                         role="treeitem"
                         :aria-selected="entry.path === fileSelectedPath"
                         :aria-expanded="entry.type === 'directory' ? isFileFolderExpanded(entry.path) : undefined"
-                        @keydown.escape.stop="fileInfoPath = ''"
+                        @keydown.escape.stop="fileActionsPath = ''; fileInfoPath = ''"
+                        @click.outside="if (fileActionsPath === entry.path) fileActionsPath = ''"
                       >
                         <button
                           type="button"
                           class="file-tree-item"
-                          @click="entry.type === 'directory' ? selectAndToggleFileFolder(entry) : selectProjectFile(entry)"
+                          @click="fileActionsPath = ''; entry.type === 'directory' ? selectAndToggleFileFolder(entry) : selectProjectFile(entry)"
                           :title="entry.path"
                         >
                           <span
@@ -444,57 +447,82 @@
                             class="file-tree-loading"
                           >Loading…</span>
                         </button>
-                        <div class="file-tree-actions" role="group" :aria-label="`Actions for ${entry.name}`">
-                          <a
-                            class="file-action"
-                            :href="projectFilesUrl('/preview', { path: entry.path, show_hidden: fileShowHidden })"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            title="Preview"
-                            :aria-label="`Preview ${entry.name} (opens in a new tab)`"
-                          >
-                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>
-                          </a>
+                        <div class="file-tree-action-group">
                           <button
                             type="button"
-                            class="file-action"
-                            :title="entry.type === 'directory' ? 'Download ZIP' : 'Download'"
-                            :aria-label="`Download ${entry.name}${entry.type === 'directory' ? ' as ZIP' : ''}`"
-                            :disabled="fileOperationBusy"
-                            @click.stop="downloadProjectFile(entry)"
+                            class="file-tree-action-toggle"
+                            :aria-label="`Show actions for ${entry.name}`"
+                            :aria-controls="`file-action-menu-${encodeURIComponent(entry.path)}`"
+                            :aria-expanded="fileActionsPath === entry.path"
+                            :title="`Actions for ${entry.name}`"
+                            @click.stop="toggleFileActions(entry, $event.currentTarget)"
                           >
-                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/></svg>
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
                           </button>
-                          <button
-                            type="button"
-                            class="file-action"
-                            title="Rename"
-                            :aria-label="`Rename ${entry.name}`"
-                            :disabled="fileOperationBusy"
-                            @click.stop="renameProjectFile(entry)"
+                          <div
+                            :id="`file-action-menu-${encodeURIComponent(entry.path)}`"
+                            class="file-tree-actions"
+                            :class="{ 'file-tree-actions-open': fileActionsPath === entry.path }"
+                            role="group"
+                            :aria-label="`Actions for ${entry.name}`"
                           >
-                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 4 5 5M4 20l5-1L21 7a2 2 0 0 0-5-5L4 14v6ZM13 20h8"/></svg>
-                          </button>
-                          <button
-                            type="button"
-                            class="file-action file-action-danger"
-                            title="Delete"
-                            :aria-label="`Delete ${entry.name}`"
-                            :disabled="fileOperationBusy"
-                            @click.stop="deleteProjectFile(entry)"
-                          >
-                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7"/></svg>
-                          </button>
-                          <button
-                            type="button"
-                            class="file-action"
-                            title="Info"
-                            :aria-label="`Info for ${entry.name}`"
-                            :aria-expanded="fileInfoPath === entry.path"
-                            @click.stop="fileInfoPath = fileInfoPath === entry.path ? '' : entry.path"
-                          >
-                            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10v1"/></svg>
-                          </button>
+                            <a
+                              class="file-action"
+                              :href="projectFilesUrl('/preview', { path: entry.path, show_hidden: fileShowHidden })"
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title="Preview"
+                              :aria-label="`Preview ${entry.name} (opens in a new tab)`"
+                              @click.stop="fileActionsPath = ''"
+                            >
+                              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>
+                              <span class="file-action-label">Preview</span>
+                            </a>
+                            <button
+                              type="button"
+                              class="file-action"
+                              :title="entry.type === 'directory' ? 'Download ZIP' : 'Download'"
+                              :aria-label="`Download ${entry.name}${entry.type === 'directory' ? ' as ZIP' : ''}`"
+                              :disabled="fileOperationBusy"
+                              @click.stop="fileActionsPath = ''; downloadProjectFile(entry)"
+                            >
+                              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/></svg>
+                              <span class="file-action-label" x-text="entry.type === 'directory' ? 'Download ZIP' : 'Download'"></span>
+                            </button>
+                            <button
+                              type="button"
+                              class="file-action"
+                              title="Rename"
+                              :aria-label="`Rename ${entry.name}`"
+                              :disabled="fileOperationBusy"
+                              @click.stop="fileActionsPath = ''; renameProjectFile(entry)"
+                            >
+                              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 4 5 5M4 20l5-1L21 7a2 2 0 0 0-5-5L4 14v6ZM13 20h8"/></svg>
+                              <span class="file-action-label">Rename</span>
+                            </button>
+                            <button
+                              type="button"
+                              class="file-action file-action-danger"
+                              title="Delete"
+                              :aria-label="`Delete ${entry.name}`"
+                              :disabled="fileOperationBusy"
+                              @click.stop="fileActionsPath = ''; deleteProjectFile(entry)"
+                            >
+                              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7"/></svg>
+                              <span class="file-action-label">Delete</span>
+                            </button>
+                            <button
+                              type="button"
+                              class="file-action"
+                              title="Info"
+                              :aria-label="`Info for ${entry.name}`"
+                              :aria-expanded="fileInfoPath === entry.path"
+                              @click.stop="fileActionsPath = ''; fileInfoPath = fileInfoPath === entry.path ? '' : entry.path"
+                            >
+                              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10v1"/></svg>
+                              <span class="file-action-label">Info</span>
+                            </button>
+                          </div>
                         </div>
                         <a
                           x-show="entry.git_status"
@@ -506,7 +534,7 @@
                           :title="projectFileDiffUrl(entry) ? `${fileGitLabel(entry)} — View diff (opens in a new tab)` : fileGitLabel(entry)"
                           :aria-label="projectFileDiffUrl(entry) ? `${fileGitLabel(entry)} — View diff for ${entry.name} (opens in a new tab)` : fileGitLabel(entry)"
                           x-text="fileGitMarker(entry)"
-                          @click.stop
+                          @click.stop="fileActionsPath = ''"
                         ></a>
                         <div
                           x-cloak

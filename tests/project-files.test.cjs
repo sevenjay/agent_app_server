@@ -11,7 +11,7 @@ function consoleView(globals = {}) {
 
 test("row actions target the hovered entry without changing the current selection", async () => {
   const html = readFileSync("static/index.html", "utf8");
-  const actions = html.split('<div class="file-tree-actions"')[1].split('</div>')[0];
+  const actions = html.split('class="file-tree-actions"')[1].split('</div>')[0];
   const handlers = [...actions.matchAll(/@click.stop="([^"]+)"/g)].map(match => match[1]);
   const calls = [];
   const view = consoleView();

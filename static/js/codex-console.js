@@ -100,6 +100,7 @@ window.codexConsole = function codexConsole() {
     fileLoadingPaths: [],
     fileCurrentPath: "",
     fileSelectedPath: "",
+    fileActionsPath: "",
     fileInfoPath: "",
     fileTreeLoading: false,
     fileOperationBusy: false,
@@ -702,11 +703,39 @@ window.codexConsole = function codexConsole() {
       this.fileLoadingPaths = [];
       this.fileCurrentPath = "";
       this.fileSelectedPath = "";
+      this.fileActionsPath = "";
       this.fileInfoPath = "";
       this.fileTreeLoading = false;
       this.fileOperationBusy = false;
       this.fileOperationLabel = "";
       this.fileError = "";
+    },
+
+    async toggleFileActions(entry, button) {
+      if (this.fileActionsPath === entry.path) {
+        this.fileActionsPath = "";
+        return;
+      }
+      const menu = button.nextElementSibling;
+      menu.style.visibility = "hidden";
+      this.fileActionsPath = entry.path;
+      await this.$nextTick();
+      menu.style.removeProperty("visibility");
+      if (this.fileActionsPath !== entry.path || !button.isConnected) return;
+
+      const anchor = button.getBoundingClientRect();
+      const bounds = menu.getBoundingClientRect();
+      const margin = 8;
+      const gap = 4;
+      const left = Math.max(margin, Math.min(
+        anchor.right - bounds.width,
+        document.documentElement.clientWidth - bounds.width - margin,
+      ));
+      const top = anchor.bottom + gap + bounds.height <= window.innerHeight - margin
+        ? anchor.bottom + gap
+        : Math.max(margin, anchor.top - bounds.height - gap);
+      menu.style.setProperty("--file-menu-left", `${left}px`);
+      menu.style.setProperty("--file-menu-top", `${top}px`);
     },
 
     async openFilesTab() {
@@ -777,6 +806,7 @@ window.codexConsole = function codexConsole() {
       const requestedSelected = options.selectedPath ?? this.fileSelectedPath;
       this.fileError = "";
       this.fileTreeLoading = true;
+      this.fileActionsPath = "";
       this.fileInfoPath = "";
       this.fileDirectories = {};
       this.fileExpandedPaths = [];
