@@ -26,7 +26,9 @@ Web UI 稱一段對話為 Session；API 與 Codex SDK 使用 Thread／`thread`�
 | Method | Path | 用途 |
 | --- | --- | --- |
 | `GET` | `/api/projects/{project_key}/files?path=&show_hidden=false` | 列出一層目錄內容；預設略過 `.` 開頭項目 |
-| `GET` | `/api/projects/{project_key}/files/download?path=` | 下載單一 regular file |
+| `GET` | `/api/projects/{project_key}/files/download?path=` | 下載單一 regular file，或將目錄打包為 ZIP（略過 symbolic link／special file） |
+| `GET` | `/api/projects/{project_key}/files/preview?path=&show_hidden=false` | 獨立 HTML 預覽頁；支援目錄、UTF-8 文字、圖片、PDF 與瀏覽器支援的影音格式 |
+| `GET` | `/api/projects/{project_key}/files/preview/content?path=` | 以 inline 回傳支援的圖片／PDF／影音；HTML、SVG 與程式碼只在預覽頁以文字呈現 |
 | `POST` | `/api/projects/{project_key}/files/directories` | 建立資料夾；JSON body 為 `path`、`name` |
 | `POST` | `/api/projects/{project_key}/files/upload?path=&name=&overwrite=` | 以 raw request body 上傳一個檔案 |
 | `PATCH` | `/api/projects/{project_key}/files` | 重新命名檔案或資料夾；JSON body 為 `path`、`name` |
@@ -35,6 +37,10 @@ Web UI 稱一段對話為 Session；API 與 Codex SDK 使用 Thread／`thread`�
 File manager 拒絕 absolute path、path traversal、Windows-style separator、control characters、symbolic link 與 special file。預設不覆寫同名上傳；只有明確傳入 `overwrite=true` 才會取代既有 regular file。
 
 `.stream_journal` 是保留區，即使 `show_hidden=true` 也不列出；Files API 拒絕存取、建立、覆寫、重新命名或刪除這棵目錄。
+
+列表回傳 `git_available`，每個項目附 `git_status`（`modified`、`added`、`deleted`、`renamed`、`conflicted`、`untracked`、`ignored` 或 `null`）及單檔的 `git_status_code`（Git porcelain XY）。目錄彙整後代變更；已刪除檔案透過仍存在的父目錄呈現。未變更或無法讀取 Git 狀態時為 `null`，不顯示標記。支援 `.git` 目錄及 worktree 的 `.git` 檔案；Git 不可用時仍可正常瀏覽檔案。
+
+Files 每列 hover／鍵盤 focus 時，依序顯示 Preview、Download、Rename、Delete、Info 圖示；觸控裝置持續顯示。Preview 在新分頁開啟；文字最多預覽 1 MiB，二進位或不支援的格式提供下載提示。Info 顯示路徑、類型、大小、修改時間與 Git 狀態。
 
 ## 對話附件
 

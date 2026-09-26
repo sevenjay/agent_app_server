@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import errno
+import mimetypes
 import os
 import re
 import shutil
 import stat
+import subprocess
 import tempfile
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +19,26 @@ from projects import Project
 
 MAX_RELATIVE_PATH_BYTES = 4096
 MAX_NAME_BYTES = 255
+MAX_PREVIEW_BYTES = 1024 * 1024
+
+PREVIEW_MEDIA_TYPES = {
+    "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "image/bmp", "image/x-icon",
+    "audio/mpeg", "audio/ogg", "audio/wav", "audio/x-wav", "audio/mp4", "audio/webm",
+    "video/mp4", "video/webm", "video/ogg", "application/pdf",
+}
+
+
+def _git_status(codes: set[str]) -> str | None:
+    if codes & {"DD", "AU", "UD", "UA", "DU", "AA", "UU"}:
+        return "conflicted"
+    for marker, label in (("D", "deleted"), ("M", "modified"), ("T", "modified"), ("R", "renamed"), ("A", "added"), ("C", "added")):
+        if any(marker in code for code in codes):
+            return label
+    if "??" in codes:
+        return "untracked"
+    if "!!" in codes:
+        return "ignored"
+    return None
 
 
 class ProjectFileError(RuntimeError):
@@ -233,10 +256,130 @@ class ProjectFileManager:
                 str(item["name"]),
             )
         )
+        git_available, git_codes = self._directory_git_status(directory)
+        for entry in entries:
+            codes = git_codes.get(entry["name"], git_codes.get("", set()))
+            entry["git_status"] = _git_status(codes)
+            entry["git_status_code"] = next(iter(codes)) if len(codes) == 1 and entry["type"] == "file" else None
         return {
             "path": _relative_string(directory, self.root),
             "data": entries,
+            "git_available": git_available,
         }
+
+    def _directory_git_status(self, directory: Path) -> tuple[bool, dict[str, set[str]]]:
+        # Porcelain -z preserves spaces, Unicode and rename source/destination paths.
+        # Disable optional index writes and filesystem monitor hooks for this read.
+        command = ["git", "--no-optional-locks", "-c", "core.fsmonitor=false", "-C", str(directory)]
+        environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+        try:
+            top = subprocess.run(
+                [*command, "rev-parse", "--show-toplevel"], capture_output=True, timeout=3, check=True, env=environment,
+            )
+            repository = Path(os.fsdecode(top.stdout.rstrip(b"\n")))
+            result = subprocess.run(
+                [*command, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=matching", "--", "."],
+                capture_output=True, timeout=3, check=True, env=environment,
+            )
+        except (OSError, subprocess.SubprocessError):
+            # Git is optional; an unavailable repository must not break file browsing.
+            return False, {}
+
+        codes: dict[str, set[str]] = {}
+
+        def record(path: bytes, code: str) -> None:
+            target = repository / os.fsdecode(path)
+            try:
+                relative = target.relative_to(directory)
+            except ValueError:
+                if code == "!!" and directory.is_relative_to(target):
+                    codes.setdefault("", set()).add(code)
+                return
+            if not relative.parts:
+                codes.setdefault("", set()).add(code)
+            elif relative.parts[0] != ".stream_journal":
+                codes.setdefault(relative.parts[0], set()).add(code)
+
+        records = iter(result.stdout.split(b"\0"))
+        for item in records:
+            if len(item) < 4:
+                continue
+            code = item[:2].decode("ascii", errors="replace")
+            record(item[3:], code)
+            if "R" in code or "C" in code:
+                original = next(records, b"")
+                if "R" in code:
+                    record(original, " D")
+        return True, codes
+
+    def preview(self, relative_path: str, *, show_hidden: bool = False) -> dict[str, Any]:
+        target = self._existing_path(relative_path)
+        entry = self._entry(target)
+        if entry["type"] == "directory":
+            return {"entry": entry, "kind": "directory", **self.list_directory(relative_path, show_hidden=show_hidden)}
+        media_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+        if media_type in PREVIEW_MEDIA_TYPES:
+            kind = "pdf" if media_type == "application/pdf" else media_type.split("/")[0]
+            return {"entry": entry, "kind": kind, "media_type": media_type}
+        try:
+            with target.open("rb") as source:
+                content = source.read(MAX_PREVIEW_BYTES + 1)
+        except PermissionError as exc:
+            raise ProjectFilePermissionError from exc
+        except FileNotFoundError as exc:
+            raise ProjectFileNotFoundError from exc
+        except OSError as exc:
+            raise ProjectFileError from exc
+        truncated = len(content) > MAX_PREVIEW_BYTES
+        content = content[:MAX_PREVIEW_BYTES]
+        try:
+            # A truncated UTF-8 character at the boundary is harmless in a preview.
+            text = content.decode("utf-8-sig", errors="replace" if truncated else "strict")
+            if any(ord(character) < 32 and character not in "\n\r\t\f" for character in text):
+                raise UnicodeError
+        except UnicodeError:
+            return {"entry": entry, "kind": "binary"}
+        return {"entry": entry, "kind": "text", "text": text, "truncated": truncated}
+
+    def preview_content(self, relative_path: str) -> tuple[Path, str]:
+        target = self.download_file(relative_path)
+        media_type = mimetypes.guess_type(target.name)[0]
+        if media_type not in PREVIEW_MEDIA_TYPES:
+            raise ProjectFileTypeError
+        return target, media_type
+
+    def prepare_download(self, relative_path: str) -> tuple[Path, str, bool]:
+        target = self._existing_path(relative_path, allow_root=False)
+        entry = self._entry(target)
+        if entry["type"] == "file":
+            return target, target.name, False
+        descriptor, name = tempfile.mkstemp(prefix="codex-download-", suffix=".zip")
+        os.close(descriptor)
+        archive_path = Path(name)
+        try:
+            with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                def walk_error(error: OSError) -> None:
+                    raise error
+
+                for folder, directories, filenames in os.walk(target, followlinks=False, onerror=walk_error):
+                    current = Path(folder)
+                    self._directory(_relative_string(current, self.root))
+                    directories[:] = [name for name in directories if not (current / name).is_symlink()]
+                    archive.write(current, current.relative_to(target.parent).as_posix() + "/")
+                    for filename in filenames:
+                        candidate = current / filename
+                        if not stat.S_ISREG(candidate.lstat().st_mode):
+                            continue
+                        source = self.download_file(_relative_string(candidate, self.root))
+                        archive.write(source, source.relative_to(target.parent).as_posix())
+        except Exception as exc:
+            archive_path.unlink(missing_ok=True)
+            if isinstance(exc, ProjectFileError):
+                raise
+            if isinstance(exc, PermissionError):
+                raise ProjectFilePermissionError from exc
+            raise ProjectFileError from exc
+        return archive_path, target.name + ".zip", True
 
     def download_file(self, relative_path: str) -> Path:
         target = self._existing_path(relative_path, allow_root=False)

@@ -100,6 +100,7 @@ window.codexConsole = function codexConsole() {
     fileLoadingPaths: [],
     fileCurrentPath: "",
     fileSelectedPath: "",
+    fileInfoPath: "",
     fileTreeLoading: false,
     fileOperationBusy: false,
     fileOperationLabel: "",
@@ -701,6 +702,7 @@ window.codexConsole = function codexConsole() {
       this.fileLoadingPaths = [];
       this.fileCurrentPath = "";
       this.fileSelectedPath = "";
+      this.fileInfoPath = "";
       this.fileTreeLoading = false;
       this.fileOperationBusy = false;
       this.fileOperationLabel = "";
@@ -775,6 +777,7 @@ window.codexConsole = function codexConsole() {
       const requestedSelected = options.selectedPath ?? this.fileSelectedPath;
       this.fileError = "";
       this.fileTreeLoading = true;
+      this.fileInfoPath = "";
       this.fileDirectories = {};
       this.fileExpandedPaths = [];
       try {
@@ -914,7 +917,7 @@ window.codexConsole = function codexConsole() {
           method: "POST",
           body: JSON.stringify({ path: parent, name }),
         });
-        await this.loadFileDirectory(parent);
+        await this.reloadFileAncestors(parent);
         this.fileOperationLabel = `Created folder ${name}.`;
       } catch (error) {
         this.fileOperationLabel = "Folder creation failed.";
@@ -970,7 +973,7 @@ window.codexConsole = function codexConsole() {
         this.showFileError(error);
       } finally {
         try {
-          await this.loadFileDirectory(parent);
+          await this.reloadFileAncestors(parent);
         } catch (error) {
           this.showFileError(error);
         }
@@ -978,10 +981,48 @@ window.codexConsole = function codexConsole() {
       }
     },
 
+    async reloadFileAncestors(path) {
+      const projectKey = this.projectKey;
+      while (this.projectKey === projectKey) {
+        await this.loadFileDirectory(path);
+        if (!path) break;
+        path = this.fileParentPath(path);
+      }
+    },
+
+    fileGitMarker(entry) {
+      return { modified: "M", added: "A", deleted: "D", renamed: "R", conflicted: "U", untracked: "?", ignored: "!" }[entry.git_status] || "";
+    },
+
+    fileGitLabel(entry) {
+      const labels = { modified: "Modified", added: "Added", deleted: "Deleted", renamed: "Renamed", conflicted: "Conflicted", untracked: "Untracked", ignored: "Ignored" };
+      const label = labels[entry.git_status];
+      if (!label) return "";
+      if (entry.type === "directory") return `Git: ${label} contents`;
+      if (entry.git_status === "conflicted") return `Git: ${label}`;
+      const code = entry.git_status_code;
+      const state = !code || code === "??" || code === "!!" ? ""
+        : code[0] !== " " && code[1] !== " " ? " (staged and unstaged)"
+        : code[0] !== " " ? " (staged)" : " (unstaged)";
+      return `Git: ${label}${state}`;
+    },
+
+    formatFileSize(size) {
+      if (size === null || size === undefined) return "—";
+      if (size < 1024) return `${size} B`;
+      const unit = Math.min(Math.floor(Math.log(size) / Math.log(1024)), 4);
+      return `${(size / (1024 ** unit)).toFixed(1)} ${["B", "KiB", "MiB", "GiB", "TiB"][unit]}`;
+    },
+
+    formatFileModified(value) {
+      if (value === null || value === undefined) return "—";
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString();
+    },
+
     async downloadProjectFile(entry = this.selectedFileEntry) {
       if (
         !entry ||
-        entry.type !== "file" ||
         !this.projectKey ||
         this.fileOperationBusy
       ) return;
@@ -1005,7 +1046,7 @@ window.codexConsole = function codexConsole() {
         const objectUrl = URL.createObjectURL(await response.blob());
         const link = document.createElement("a");
         link.href = objectUrl;
-        link.download = entry.name;
+        link.download = entry.type === "directory" ? `${entry.name}.zip` : entry.name;
         document.body.append(link);
         link.click();
         link.remove();

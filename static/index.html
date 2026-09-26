@@ -392,46 +392,6 @@
                   </div>
 
                   <div
-                    x-cloak
-                    x-show="selectedFileEntry"
-                    class="files-selection"
-                    aria-live="polite"
-                  >
-                    <div class="files-selection-target">
-                      <span
-                        class="file-tree-icon"
-                        aria-hidden="true"
-                        x-text="selectedFileEntry?.type === 'directory' ? '▰' : '▤'"
-                      ></span>
-                      <div class="min-w-0">
-                        <strong x-text="selectedFileEntry?.name"></strong>
-                        <code x-text="selectedFileEntry?.path"></code>
-                      </div>
-                    </div>
-                    <div class="files-selection-actions">
-                      <button
-                        x-show="selectedFileEntry?.type === 'file'"
-                        type="button"
-                        class="button-secondary"
-                        :disabled="fileOperationBusy"
-                        @click="downloadProjectFile()"
-                      >Download</button>
-                      <button
-                        type="button"
-                        class="button-secondary"
-                        :disabled="fileOperationBusy"
-                        @click="renameProjectFile(selectedFileEntry)"
-                      >Rename</button>
-                      <button
-                        type="button"
-                        class="button-danger"
-                        :disabled="fileOperationBusy"
-                        @click="deleteProjectFile(selectedFileEntry)"
-                      >Delete</button>
-                    </div>
-                  </div>
-
-                  <div
                     x-show="fileError"
                     class="files-error"
                     role="alert"
@@ -462,6 +422,7 @@
                         role="treeitem"
                         :aria-selected="entry.path === fileSelectedPath"
                         :aria-expanded="entry.type === 'directory' ? isFileFolderExpanded(entry.path) : undefined"
+                        @keydown.escape.stop="fileInfoPath = ''"
                       >
                         <button
                           type="button"
@@ -482,6 +443,81 @@
                             class="file-tree-loading"
                           >Loading…</span>
                         </button>
+                        <div class="file-tree-actions" role="group" :aria-label="`Actions for ${entry.name}`">
+                          <a
+                            class="file-action"
+                            :href="projectFilesUrl('/preview', { path: entry.path, show_hidden: fileShowHidden })"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="Preview"
+                            :aria-label="`Preview ${entry.name} (opens in a new tab)`"
+                          >
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>
+                          </a>
+                          <button
+                            type="button"
+                            class="file-action"
+                            :title="entry.type === 'directory' ? 'Download ZIP' : 'Download'"
+                            :aria-label="`Download ${entry.name}${entry.type === 'directory' ? ' as ZIP' : ''}`"
+                            :disabled="fileOperationBusy"
+                            @click.stop="downloadProjectFile(entry)"
+                          >
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/></svg>
+                          </button>
+                          <button
+                            type="button"
+                            class="file-action"
+                            title="Rename"
+                            :aria-label="`Rename ${entry.name}`"
+                            :disabled="fileOperationBusy"
+                            @click.stop="renameProjectFile(entry)"
+                          >
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 4 5 5M4 20l5-1L21 7a2 2 0 0 0-5-5L4 14v6ZM13 20h8"/></svg>
+                          </button>
+                          <button
+                            type="button"
+                            class="file-action file-action-danger"
+                            title="Delete"
+                            :aria-label="`Delete ${entry.name}`"
+                            :disabled="fileOperationBusy"
+                            @click.stop="deleteProjectFile(entry)"
+                          >
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7"/></svg>
+                          </button>
+                          <button
+                            type="button"
+                            class="file-action"
+                            title="Info"
+                            :aria-label="`Info for ${entry.name}`"
+                            :aria-expanded="fileInfoPath === entry.path"
+                            @click.stop="fileInfoPath = fileInfoPath === entry.path ? '' : entry.path"
+                          >
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10v1"/></svg>
+                          </button>
+                        </div>
+                        <span
+                          x-show="entry.git_status"
+                          class="file-git-status"
+                          :data-status="entry.git_status"
+                          :title="fileGitLabel(entry)"
+                          :aria-label="fileGitLabel(entry)"
+                          x-text="fileGitMarker(entry)"
+                        ></span>
+                        <div
+                          x-cloak
+                          x-show="fileInfoPath === entry.path"
+                          class="file-info"
+                          @keydown.escape.stop="fileInfoPath = ''"
+                        >
+                          <dl>
+                            <div><dt>Path</dt><dd x-text="entry.path"></dd></div>
+                            <div><dt>Type</dt><dd x-text="entry.type === 'directory' ? 'Folder' : 'File'"></dd></div>
+                            <div x-show="entry.type === 'file'"><dt>Size</dt><dd x-text="formatFileSize(entry.size)"></dd></div>
+                            <div><dt>Modified</dt><dd x-text="formatFileModified(entry.modified_at)"></dd></div>
+                            <div x-show="entry.git_status"><dt>Git</dt><dd x-text="fileGitLabel(entry)"></dd></div>
+                          </dl>
+                          <button type="button" class="file-action" title="Close info" aria-label="Close info" @click="fileInfoPath = ''">×</button>
+                        </div>
                       </div>
                     </template>
                   </div>

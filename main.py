@@ -11,6 +11,7 @@ from collections.abc import Callable
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Annotated, Any
+from urllib.parse import urlencode
 
 from fastapi import Depends, FastAPI, Query, Request, Response, status
 from fastapi import Path as PathParameter
@@ -449,9 +450,9 @@ def create_app(
         )
         response.headers["X-Request-ID"] = request_id
         response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
+        response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers["Referrer-Policy"] = "same-origin"
-        response.headers["Content-Security-Policy"] = "; ".join(
+        response.headers.setdefault("Content-Security-Policy", "; ".join(
             (
                 "default-src 'self'",
                 "base-uri 'self'",
@@ -463,7 +464,7 @@ def create_app(
                 "connect-src 'self'",
                 "img-src 'self' data:",
             )
-        )
+        ))
         return response
 
     application.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -594,6 +595,62 @@ def create_app(
         )
 
     @application.get(
+        "/api/projects/{project_key}/files/preview",
+        response_class=HTMLResponse,
+        dependencies=[Depends(require_web_user)],
+    )
+    async def api_preview_project_file(
+        request: Request,
+        project_key: ProjectKey,
+        path: Annotated[str, Query(max_length=4096)] = "",
+        show_hidden: bool = False,
+    ) -> HTMLResponse:
+        manager = project_file_manager(request, project_key)
+        preview = await asyncio.to_thread(manager.preview, path, show_hidden=show_hidden)
+        base = f"/api/projects/{project_key}/files"
+
+        def preview_url(target: str) -> str:
+            return base + "/preview?" + urlencode({"path": target, "show_hidden": str(show_hidden).lower()})
+
+        return templates.TemplateResponse(
+            request=request,
+            name="file_preview.html",
+            context={
+                **preview,
+                "project_key": project_key,
+                "preview_url": preview_url,
+                "parent_path": path.rpartition("/")[0],
+                "download_url": base + "/download?" + urlencode({"path": path}),
+                "content_url": base + "/preview/content?" + urlencode({"path": path}),
+            },
+            headers={
+                "Cache-Control": "no-store",
+                "X-Content-Type-Options": "nosniff",
+                "Content-Security-Policy": "default-src 'none'; style-src 'self'; img-src 'self'; media-src 'self'; frame-src 'self'; base-uri 'none'; frame-ancestors 'none'",
+            },
+        )
+
+    @application.get(
+        "/api/projects/{project_key}/files/preview/content",
+        response_class=FileResponse,
+        dependencies=[Depends(require_web_user)],
+    )
+    async def api_preview_project_file_content(
+        request: Request,
+        project_key: ProjectKey,
+        path: Annotated[str, Query(min_length=1, max_length=4096)],
+    ) -> FileResponse:
+        manager = project_file_manager(request, project_key)
+        target, media_type = await asyncio.to_thread(manager.preview_content, path)
+        return FileResponse(
+            target, filename=target.name, media_type=media_type, content_disposition_type="inline",
+            headers={
+                "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "X-Frame-Options": "SAMEORIGIN",
+                "Content-Security-Policy": "sandbox; default-src 'none'; frame-ancestors 'self'",
+            },
+        )
+
+    @application.get(
         "/api/projects/{project_key}/files/download",
         response_class=FileResponse,
         dependencies=[Depends(require_web_user)],
@@ -604,11 +661,12 @@ def create_app(
         path: Annotated[str, Query(min_length=1, max_length=4096)],
     ) -> FileResponse:
         manager = project_file_manager(request, project_key)
-        target = await asyncio.to_thread(manager.download_file, path)
+        target, filename, temporary = await asyncio.to_thread(manager.prepare_download, path)
         return FileResponse(
             target,
-            filename=target.name,
+            filename=filename,
             media_type="application/octet-stream",
+            background=BackgroundTask(target.unlink, missing_ok=True) if temporary else None,
         )
 
     @application.post(
