@@ -1036,7 +1036,7 @@ window.codexConsole = function codexConsole() {
     },
 
     fileGitMarker(entry) {
-      return { modified: "M", added: "A", deleted: "D", renamed: "R", conflicted: "U", untracked: "?", ignored: "!" }[entry.git_status] || "";
+      return { modified: "M", added: "A", deleted: "D", renamed: "R", conflicted: "U", untracked: "?", ignored: "∅" }[entry.git_status] || "";
     },
 
     projectFileDiffUrl(entry) {

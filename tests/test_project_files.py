@@ -1,4 +1,6 @@
 import io
+import os
+import re
 import subprocess
 import zipfile
 from pathlib import Path
@@ -293,7 +295,9 @@ async def test_preview_text_folders_media_and_binary_files(tmp_path: Path) -> No
 
     assert text.status_code == 200
     assert "&lt;script&gt;" in text.text and "<script>" not in text.text
-    assert "你好" in text.text and "Parent folder" in text.text
+    assert "你好" in text.text and "Parent folder" not in text.text
+    assert 'aria-label="File path"' in text.text
+    assert 'aria-label="Copy raw"' in text.text
     assert "default-src 'none'" in text.headers["content-security-policy"]
     assert text.headers["cache-control"] == "no-store"
     assert "example #1.html" in folder.text and ".hidden" not in folder.text
@@ -301,7 +305,7 @@ async def test_preview_text_folders_media_and_binary_files(tmp_path: Path) -> No
     assert ".hidden" in hidden.text and "show_hidden=true" in hidden.text
     assert "Preview is not available" in binary.text
     assert "Showing the first 1 MiB" in large.text
-    assert len(large.content) < MAX_PREVIEW_BYTES + 2000
+    assert len(large.content) < MAX_PREVIEW_BYTES + 8192
     assert '<img src="' in image.text
     assert content.status_code == 200 and content.content.startswith(b"\x89PNG")
     assert content.headers["content-type"] == "image/png"
@@ -309,6 +313,81 @@ async def test_preview_text_folders_media_and_binary_files(tmp_path: Path) -> No
     assert "sandbox" in content.headers["content-security-policy"]
     assert html_content.status_code == 400
     assert missing.status_code == 404 and unknown.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_preview_breadcrumbs_link_each_directory_and_preserve_hidden_setting(tmp_path: Path) -> None:
+    project = tmp_path / "agent_app_server"
+    folder = project / "docs & 資料" / "api #1"
+    folder.mkdir(parents=True)
+    (folder / "api.md").write_text("# API\n\n<script>alert('unsafe')</script>", encoding="utf-8")
+    base = "/api/projects/files_project/files/preview"
+    async with application_client(file_application(project)) as client:
+        page = await client.get(base, params={"path": "docs & 資料/api #1/api.md", "show_hidden": "true"})
+        root = await client.get(base)
+
+    assert page.status_code == 200
+    assert f'href="{base}?path=&amp;show_hidden=true">agent_app_server</a>' in page.text
+    assert f'href="{base}?path=docs+%26+%E8%B3%87%E6%96%99&amp;show_hidden=true"' in page.text
+    assert f'href="{base}?path=docs+%26+%E8%B3%87%E6%96%99%2Fapi+%231&amp;show_hidden=true"' in page.text
+    assert '<span aria-current="page">api.md</span>' in page.text
+    assert "Parent folder" not in page.text and "<h1>api.md</h1>" not in page.text
+    assert "&lt;script&gt;" in page.text and "<script>alert" not in page.text
+    assert '<span aria-current="page">agent_app_server</span>' in root.text
+    assert 'id="file-download"' not in root.text
+    csp = page.headers["content-security-policy"]
+    assert "script-src 'self'" in csp and "connect-src 'self'" in csp
+    script_policy = next(part for part in csp.split(";") if part.strip().startswith("script-src "))
+    assert "unsafe-inline" not in script_policy and "base-uri 'none'" in csp
+    assert script_policy.strip() == "script-src 'self'" and "frame-src 'self' data:" in csp
+    assert "unsafe-inline" not in root.headers["content-security-policy"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("filename", ["api.md", "README.MD", "readme.markdown", "app.py", "app.js", "config.yaml", "pyproject.toml", "notes.txt"])
+async def test_preview_only_markdown_has_two_views(tmp_path: Path, filename: str) -> None:
+    (tmp_path / filename).write_text("# title\n\nhello", encoding="utf-8")
+    async with application_client(file_application(tmp_path)) as client:
+        page = await client.get("/api/projects/files_project/files/preview", params={"path": filename})
+
+    assert page.status_code == 200
+    markdown = filename.lower().endswith((".md", ".markdown"))
+    assert ('id="file-preview-tab"' in page.text) is markdown
+    assert ('id="file-plain-tab"' in page.text) is markdown
+    assert ("/static/vendor/marked-15.0.12.min.js" in page.text) is markdown
+    assert ("/static/vendor/dompurify-3.2.6.min.js" in page.text) is markdown
+    assert "https://unpkg.com" not in page.text
+    assert "mermaid-11.12.0.min.js" not in page.text  # Loaded on demand after Markdown is ready.
+    assert 'src="/static/js/file-preview.js?v=' in page.text
+    assert 'aria-label="Copy raw"' in page.text
+    assert page.text.count('aria-label="Download"') == 1
+
+
+@pytest.mark.asyncio
+async def test_preview_script_url_changes_with_content_even_when_metadata_is_unchanged(tmp_path: Path, monkeypatch) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "notes.md").write_text("# Preview")
+    static = tmp_path / "static"
+    (static / "js").mkdir(parents=True)
+    script = static / "js" / "file-preview.js"
+    script.write_text("window.previewRevision = 1;")
+    metadata = script.stat()
+    monkeypatch.setattr("main.STATIC_DIR", static)
+
+    def script_url(html):
+        return re.search(r'src="(/static/js/file-preview\.js\?v=[a-f0-9]+)"', html).group(1)
+
+    async with application_client(file_application(project)) as client:
+        url = "/api/projects/files_project/files/preview?path=notes.md"
+        first = script_url((await client.get(url)).text)
+        assert script_url((await client.get(url)).text) == first
+        assert (await client.get(first)).text == "window.previewRevision = 1;"
+        script.write_text("window.previewRevision = 2;")
+        os.utime(script, ns=(metadata.st_atime_ns, metadata.st_mtime_ns))
+        updated = script_url((await client.get(url)).text)
+        assert updated != first
+        assert (await client.get(updated)).text == "window.previewRevision = 2;"
 
 
 @pytest.mark.asyncio

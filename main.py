@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import time
@@ -10,6 +11,7 @@ import uuid
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import urlencode
 
@@ -638,22 +640,42 @@ def create_app(
         def preview_url(target: str) -> str:
             return base + "/preview?" + urlencode({"path": target, "show_hidden": str(show_hidden).lower()})
 
+        parts = preview["entry"]["path"].split("/") if preview["entry"]["path"] else []
+        breadcrumbs = [{"name": manager.root.name, "path": ""}]
+        breadcrumbs.extend({"name": part, "path": "/".join(parts[:index + 1])} for index, part in enumerate(parts))
+        is_markdown = preview["kind"] == "text" and Path(preview["entry"]["name"]).suffix.lower() in {".md", ".markdown"}
+        preview_script_url = ""
+        if preview["kind"] == "text":
+            # The preview HTML is uncached, but browsers may still reuse an older script.
+            script_hash = hashlib.sha256((STATIC_DIR / "js" / "file-preview.js").read_bytes()).hexdigest()[:16]
+            preview_script_url = f"/static/js/file-preview.js?v={script_hash}"
+
         return templates.TemplateResponse(
             request=request,
             name="file_preview.html",
             context={
                 **preview,
                 "project_key": project_key,
+                "breadcrumbs": breadcrumbs,
+                "is_markdown": is_markdown,
+                "preview_script_url": preview_script_url,
                 "preview_url": preview_url,
                 "diff_url": lambda target: base + "/diff?" + urlencode({"path": target}),
-                "parent_path": path.rpartition("/")[0],
                 "download_url": base + "/download?" + urlencode({"path": path}),
                 "content_url": base + "/preview/content?" + urlencode({"path": path}),
             },
             headers={
                 "Cache-Control": "no-store",
                 "X-Content-Type-Options": "nosniff",
-                "Content-Security-Policy": "default-src 'none'; style-src 'self'; img-src 'self'; media-src 'self'; frame-src 'self'; base-uri 'none'; frame-ancestors 'none'",
+                "Content-Security-Policy": (
+                    "default-src 'none'; "
+                    "script-src 'self'; "
+                    "connect-src 'self'; img-src 'self'; media-src 'self'; "
+                    # Mermaid's sandbox renderer generates styled data-URL iframes.
+                    + ("style-src 'self' 'unsafe-inline'; frame-src 'self' data:; " if is_markdown
+                       else "style-src 'self'; frame-src 'self'; ")
+                    + "base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+                ),
             },
         )
 
