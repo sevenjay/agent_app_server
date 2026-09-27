@@ -5,22 +5,55 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{{ entry.name }} · File preview</title>
     <link rel="stylesheet" href="/static/css/tailwind.css">
+    {% if kind == 'text' %}
+    {% if is_markdown %}
+    <script defer src="/static/vendor/marked-15.0.12.min.js"
+      integrity="sha384-948ahk4ZmxYVYOc+rxN1H2gM1EJ2Duhp7uHtZ4WSLkV4Vtx5MUqnV+l7u9B+jFv+" crossorigin="anonymous"></script>
+    <script defer src="/static/vendor/dompurify-3.2.6.min.js"
+      integrity="sha384-JEyTNhjM6R1ElGoJns4U2Ln4ofPcqzSsynQkmEc/KGy6336qAZl70tDLufbkla+3" crossorigin="anonymous"></script>
+    {% endif %}
+    <script defer src="{{ preview_script_url }}"></script>
+    {% endif %}
   </head>
   <body class="file-preview-page">
-    <main class="file-preview-layout">
-      <header class="file-preview-heading">
-        <div>
-          <p class="section-kicker">{{ project_key }} · {{ 'Folder' if kind == 'directory' else 'File' }} preview</p>
-          <h1>{{ entry.name }}</h1>
-          <code>{{ entry.path or '/' }}</code>
-        </div>
-        <nav aria-label="Preview actions">
-          {% if entry.path %}
-          <a class="button-secondary" href="{{ preview_url(parent_path) }}">Parent folder</a>
-          <a class="button-secondary" href="{{ download_url }}">{{ 'Download ZIP' if kind == 'directory' else 'Download' }}</a>
-          {% endif %}
+    <main class="file-preview-layout" data-file-name="{{ entry.name }}">
+      <header class="file-preview-header">
+        <nav class="file-preview-breadcrumbs pretty-scrollbar" aria-label="File path">
+          <ol>
+            {% for crumb in breadcrumbs %}
+            <li>
+              {% if not loop.first %}<span class="file-preview-separator" aria-hidden="true">/</span>{% endif %}
+              {% if loop.last %}<span aria-current="page">{{ crumb.name }}</span>
+              {% else %}<a href="{{ preview_url(crumb.path) }}">{{ crumb.name }}</a>{% endif %}
+            </li>
+            {% endfor %}
+          </ol>
         </nav>
       </header>
+      <div class="file-preview-bar">
+        {% if is_markdown %}
+        <div class="file-preview-tabs" role="tablist" aria-label="File view">
+          <button id="file-preview-tab" class="file-preview-tab" type="button" role="tab" aria-selected="false" aria-controls="file-preview-rendered" tabindex="-1" disabled>Preview</button>
+          <button id="file-plain-tab" class="file-preview-tab" type="button" role="tab" aria-selected="true" aria-controls="file-preview-plain">Plain text</button>
+        </div>
+        {% else %}
+        <span class="file-preview-tab file-preview-label">{{ 'Plain text' if kind == 'text' else 'Folder contents' if kind == 'directory' else 'Preview' }}</span>
+        {% endif %}
+        <div class="file-preview-actions">
+          {% if kind == 'text' %}
+          <button id="file-copy-raw" class="file-preview-icon" type="button" aria-label="Copy raw" title="Copy raw" disabled>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h3"/></svg>
+          </button>
+          {% endif %}
+          {% if entry.path %}
+          <a id="file-download" class="file-preview-icon" href="{{ download_url }}" aria-label="{{ 'Download ZIP' if kind == 'directory' else 'Download' }}" title="{{ 'Download ZIP' if kind == 'directory' else 'Download' }}">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/></svg>
+          </a>
+          {% endif %}
+        </div>
+      </div>
+      {% if kind == 'text' %}<p id="file-preview-status" class="file-preview-status" role="status" aria-live="polite"></p>{% endif %}
+      {% if is_markdown %}<p id="file-render-status" class="file-preview-status" role="status" aria-live="polite">Loading Markdown preview…</p>{% endif %}
       {% if kind == 'directory' %}
       <ul class="file-preview-directory" aria-label="Folder contents">
         {% for child in data %}
@@ -37,7 +70,12 @@
       </ul>
       {% elif kind == 'text' %}
       {% if truncated %}<p class="file-preview-notice">Showing the first 1 MiB. Download the file to see all content.</p>{% endif %}
-      <pre class="file-preview-text"><code>{{ text }}</code></pre>
+      {% if is_markdown %}
+      <div id="file-preview-rendered" class="file-preview-markdown markdown-body" role="tabpanel" aria-labelledby="file-preview-tab" tabindex="0" hidden></div>
+      {% endif %}
+      <div id="file-preview-plain"{% if is_markdown %} role="tabpanel" aria-labelledby="file-plain-tab" tabindex="0"{% endif %}>
+        <pre class="file-preview-text pretty-scrollbar"><code id="file-preview-source">{{ text }}</code></pre>
+      </div>
       {% elif kind == 'image' %}
       <div class="file-preview-media"><img src="{{ content_url }}" alt="{{ entry.name }}"></div>
       {% elif kind == 'pdf' %}

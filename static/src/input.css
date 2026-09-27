@@ -23,6 +23,7 @@
 @source "../../templates/**/*.html";
 @source "../index.html";
 @source "../js/**/*.js";
+@source not "../vendor";
 
 @theme {
   --font-sans: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -1805,6 +1806,158 @@
   .file-preview-layout {
     margin: 0 auto;
     max-width: 90rem;
+  }
+
+  .file-preview-header {
+    margin-bottom: 1rem;
+  }
+
+  .file-preview-breadcrumbs {
+    font-size: 0.9rem;
+    overflow-x: auto;
+    padding-block: 0.25rem;
+  }
+
+  .file-preview-breadcrumbs ol,
+  .file-preview-breadcrumbs li {
+    align-items: center;
+    display: flex;
+    gap: 0.65rem;
+    white-space: nowrap;
+  }
+
+  .file-preview-breadcrumbs a {
+    color: var(--color-brand-400);
+  }
+
+  .file-preview-breadcrumbs a:hover {
+    text-decoration: underline;
+  }
+
+  .file-preview-breadcrumbs [aria-current] {
+    color: white;
+    font-weight: 600;
+  }
+
+  .file-preview-separator {
+    color: var(--color-slate-500);
+  }
+
+  .file-preview-bar {
+    align-items: center;
+    background: var(--color-surface-900);
+    border: 1px solid var(--color-surface-700);
+    border-radius: 4px;
+    display: flex;
+    gap: 0.5rem;
+    justify-content: space-between;
+    margin-bottom: 1rem;
+    padding: 0.3rem 0.5rem;
+  }
+
+  .file-preview-tabs,
+  .file-preview-actions {
+    align-items: center;
+    display: flex;
+    flex: none;
+    gap: 0.25rem;
+  }
+
+  .file-preview-tab {
+    border-radius: 3px;
+    color: var(--color-slate-400);
+    font-size: 0.8rem;
+    padding: 0.45rem 0.65rem;
+    white-space: nowrap;
+  }
+
+  button.file-preview-tab,
+  .file-preview-icon {
+    cursor: pointer;
+  }
+
+  .file-preview-tab[aria-selected="true"],
+  .file-preview-label {
+    background: var(--color-surface-800);
+    color: white;
+  }
+
+  .file-preview-icon {
+    align-items: center;
+    border-radius: 3px;
+    color: var(--color-slate-300);
+    display: inline-flex;
+    height: 2rem;
+    justify-content: center;
+    width: 2rem;
+  }
+
+  .file-preview-icon svg {
+    height: 1.1rem;
+    width: 1.1rem;
+  }
+
+  .file-preview-tab:hover:not(:disabled),
+  .file-preview-icon:hover:not(:disabled) {
+    background: var(--color-surface-700);
+    color: white;
+  }
+
+  .file-preview-tab:disabled,
+  .file-preview-icon:disabled {
+    cursor: default;
+    opacity: 0.5;
+  }
+
+  .file-preview-breadcrumbs a:focus-visible,
+  .file-preview-icon:focus-visible {
+    outline: 2px solid var(--color-brand-400);
+    outline-offset: 2px;
+  }
+
+  .file-preview-markdown {
+    background: var(--color-surface-900);
+    border: 1px solid var(--color-surface-700);
+    border-radius: 4px;
+    padding: 1.25rem;
+  }
+
+  .file-preview-status {
+    color: var(--color-slate-400);
+    font-size: 0.75rem;
+    margin-block: 0.5rem;
+  }
+
+  .file-preview-status:empty {
+    display: none;
+  }
+
+  .file-preview-copy-source {
+    height: 1px;
+    opacity: 0;
+    position: fixed;
+    top: 0;
+    width: 1px;
+  }
+
+  .file-preview-page .hljs {
+    color: #c9d1d9;
+  }
+
+  .file-preview-page :is(.hljs-keyword, .hljs-selector-tag, .hljs-deletion) { color: #ff7b72; }
+  .file-preview-page :is(.hljs-title, .hljs-section) { color: #d2a8ff; }
+  .file-preview-page :is(.hljs-attr, .hljs-attribute, .hljs-number, .hljs-literal, .hljs-built_in, .hljs-type, .hljs-symbol) { color: #79c0ff; }
+  .file-preview-page :is(.hljs-string, .hljs-regexp, .hljs-doctag) { color: #a5d6ff; }
+  .file-preview-page :is(.hljs-comment, .hljs-quote) { color: #8b949e; }
+  .file-preview-page :is(.hljs-name, .hljs-selector-class, .hljs-selector-id, .hljs-addition) { color: #7ee787; }
+  .file-preview-page :is(.hljs-variable, .hljs-template-variable, .hljs-meta) { color: #ffa657; }
+  .file-preview-page .hljs-emphasis { font-style: italic; }
+  .file-preview-page .hljs-strong { font-weight: 600; }
+
+  @media (max-width: 640px) {
+    .file-preview-page { padding: 0.75rem; }
+    .file-preview-bar { padding-inline: 0.25rem; }
+    .file-preview-tab { padding-inline: 0.5rem; }
   }
 
   .file-preview-heading {
