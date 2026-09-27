@@ -148,7 +148,7 @@ node_bin	""	不額外注入 Node 路徑至子程序，完全沿用系統現有 P
 
 ## Database 與 migration
 
-預設 SQLite 位於 repository 外的 `../agent_app_server_data/app.db`。連線會啟用 WAL、foreign keys、5 秒 busy timeout 與 pool pre-ping。
+預設 SQLite 位於 repository 外的 `../data/agent_app_server/app.db`。連線會啟用 WAL、foreign keys、5 秒 busy timeout 與 pool pre-ping。
 
 目前 schema：
 

@@ -9,7 +9,7 @@ oauth2_proxy_subject_header = "X-Forwarded-User"
 oauth2_proxy_username_header = "X-Forwarded-Preferred-Username"
 
 # Relative paths are resolved from the repository root.
-database_path = "../agent_app_server_data/app.db"
+database_path = "../data/agent_app_server/app.db"
 database_echo = false
 
 scheduler_enabled = true
@@ -44,7 +44,7 @@ codex_journal_retention_days = 30
 # arbitrary path from the browser.
 codex_projects_root = "/codex"
 # Project keys or directory names excluded from the Web project selector.
-codex_hidden_projects = ["agent_app_server_data"]
+codex_hidden_projects = ["data"]
 
 [development]
 web_host = "127.0.0.1"
