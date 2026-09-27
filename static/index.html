@@ -51,7 +51,7 @@
 
       <main
         class="app-layout grid min-h-0 min-w-0 flex-1"
-        :class="{ 'sidebar-collapsed': !sidebarOpen }"
+        :class="{ 'sidebar-collapsed': !sidebarOpen, 'inspector-collapsed': !inspectorOpen }"
       >
         <aside
           class="sidebar min-h-0"
@@ -266,6 +266,18 @@
               <span class="sr-only" x-text="connectionLabel"></span>
               <span class="status-dot" :class="{ 'status-dot-off': connectionState !== 'connected' }"></span>
             </div>
+            <button
+              x-cloak
+              x-show="!inspectorOpen"
+              x-ref="inspectorShow"
+              type="button"
+              class="icon-button inspector-toggle"
+              title="Show right sidebar"
+              aria-label="Show right sidebar"
+              aria-controls="inspector"
+              :aria-expanded="inspectorOpen"
+              @click="inspectorOpen = true; localStorage.setItem('cc-inspector-open', '1'); $nextTick(() => $refs.inspectorCollapse.focus())"
+            >‹</button>
           </div>
 
           <div
@@ -612,6 +624,7 @@
         </section>
 
         <aside
+          id="inspector"
           class="inspector min-h-0"
           :class="{ 'hidden lg:flex': mobileTab !== 'plan' && mobileTab !== 'status' }"
         >
@@ -620,11 +633,23 @@
               <span class="status-dot" :class="{ 'status-dot-off': connectionState !== 'connected' }"></span>
               <span class="truncate text-xs text-slate-500" x-text="connectionLabel"></span>
             </div>
-            <span
-              class="app-version hidden lg:block"
-              title="Application version"
-              x-text="appVersion ? `v${appVersion}` : ''"
-            ></span>
+            <div class="hidden flex-none items-center gap-2 lg:flex">
+              <span
+                class="app-version"
+                title="Application version"
+                x-text="appVersion ? `v${appVersion}` : ''"
+              ></span>
+              <button
+                x-ref="inspectorCollapse"
+                type="button"
+                class="icon-button flex-none"
+                title="Collapse right sidebar"
+                aria-label="Collapse right sidebar"
+                aria-controls="inspector"
+                :aria-expanded="inspectorOpen"
+                @click="inspectorOpen = false; localStorage.setItem('cc-inspector-open', '0'); $nextTick(() => $refs.inspectorShow.focus())"
+              >›</button>
+            </div>
             <p
               class="truncate text-sm font-semibold text-white lg:hidden"
               x-text="mobileTab === 'status' ? 'Status' : 'Goal & plan'"

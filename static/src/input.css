@@ -81,20 +81,39 @@
       grid-template-columns: 0 minmax(0, 1fr) 18rem;
     }
 
+    .app-layout.inspector-collapsed {
+      grid-template-columns: 16rem minmax(0, 1fr) 0;
+    }
+
+    .app-layout.sidebar-collapsed.inspector-collapsed {
+      grid-template-columns: 0 minmax(0, 1fr) 0;
+    }
+
     .app-layout.sidebar-collapsed .sidebar {
       border-right-color: transparent;
     }
+
+    .app-layout.inspector-collapsed .inspector {
+      border-left-color: transparent;
+      visibility: hidden;
+    }
   }
 
-  .sidebar-toggle {
+  .sidebar-toggle,
+  .inspector-toggle {
     align-self: end;
     display: none;
     flex: none;
     margin: 0 0.25rem 0.3rem 0;
   }
 
+  .inspector-toggle {
+    margin: 0 0 0.3rem 0.25rem;
+  }
+
   @media (min-width: 1024px) {
-    .sidebar-toggle {
+    .sidebar-toggle,
+    .inspector-toggle {
       display: inline-flex;
       align-items: center;
       justify-content: center;

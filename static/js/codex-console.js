@@ -81,6 +81,7 @@ window.codexConsole = function codexConsole() {
     mobileTab: "chat",
     conversationTab: "timeline",
     sidebarOpen: localStorage.getItem("cc-sidebar-open") !== "0",
+    inspectorOpen: localStorage.getItem("cc-inspector-open") !== "0",
     collapsibleToolCardCount: 0,
     allToolCardsExpanded: false,
     collapsibleToolBlockCount: 0,
