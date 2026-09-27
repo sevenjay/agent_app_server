@@ -405,6 +405,8 @@ class FakeCodex:
         if thread_id not in self.threads:
             raise RuntimeError("not found")
         self.thread_resume_requests.append((thread_id, kwargs))
+        if kwargs.get("cwd") is not None:
+            self.threads[thread_id]["cwd"] = kwargs["cwd"]
         return FakeThread(self, thread_id)
 
     async def thread_fork(self, thread_id: str, **_kwargs):

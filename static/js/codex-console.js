@@ -33,6 +33,8 @@ window.codexConsole = function codexConsole() {
   return {
     projects: [],
     projectKey: "",
+    projectActionsKey: "",
+    projectOperationBusy: false,
     threadId: "",
     appVersion: "",
     model: "",
@@ -618,13 +620,14 @@ window.codexConsole = function codexConsole() {
     },
 
     async selectProject(projectKey) {
-      if (this.composerSubmitting) return;
+      if (this.composerSubmitting || this.projectOperationBusy) return;
       if (this.projectKey === projectKey) return;
       if (this.fileOperationBusy) {
         this.showFileError(new Error("Wait for the current file operation to finish."));
         return;
       }
       this.sessionActionsThreadId = "";
+      this.projectActionsKey = "";
       this.projectKey = projectKey;
       this.resetProjectFiles(projectKey);
       this.threadId = "";
@@ -1370,7 +1373,69 @@ window.codexConsole = function codexConsole() {
       }
     },
 
+    async renameProject(projectKey) {
+      if (this.projectOperationBusy || this.composerSubmitting || this.fileOperationBusy) return;
+      const project = this.projects.find((item) => item.key === projectKey);
+      if (!project) return;
+      const name = window.prompt("New project directory name", project.name)?.trim();
+      if (!name || name === project.name) return;
+      this.projectOperationBusy = true;
+      try {
+        const renamed = await this.api(`/api/projects/${encodeURIComponent(projectKey)}`, {
+          method: "PATCH",
+          body: JSON.stringify({ name }),
+        });
+        this.projects = this.projects.map((item) => item.key === projectKey ? renamed : item);
+        if (this.projectKey === projectKey) {
+          this.projectKey = renamed.key;
+          this.resetProjectFiles(renamed.key);
+          await this.refreshThreads();
+          if (this.threadId) await this.refreshThread();
+          if (this.conversationTab === "files") await this.ensureProjectFiles();
+        }
+        await this.refreshProjects();
+      } catch (error) {
+        this.showError(error);
+      } finally {
+        this.projectOperationBusy = false;
+      }
+    },
+
+    async deleteProject(projectKey) {
+      if (this.projectOperationBusy || this.composerSubmitting || this.fileOperationBusy) return;
+      const project = this.projects.find((item) => item.key === projectKey);
+      if (!project || !window.confirm(
+        `Delete project "${project.name}" and all files in:\n${project.path}\n\nThis cannot be undone.`,
+      )) return;
+      this.projectOperationBusy = true;
+      try {
+        await this.api(`/api/projects/${encodeURIComponent(projectKey)}`, { method: "DELETE" });
+        this.projects = this.projects.filter((item) => item.key !== projectKey);
+        if (this.projectKey === projectKey) {
+          this.projectKey = "";
+          this.threadId = "";
+          this.sessionActionsThreadId = "";
+          this.closeEvents();
+          this.clearThreadPanels();
+          this.resetProjectFiles();
+          const list = document.getElementById("thread-list");
+          if (list) {
+            const empty = document.createElement("p");
+            empty.className = "empty-state";
+            empty.textContent = "Choose a project.";
+            list.replaceChildren(empty);
+          }
+        }
+        await this.refreshProjects();
+      } catch (error) {
+        this.showError(error);
+      } finally {
+        this.projectOperationBusy = false;
+      }
+    },
+
     async newProject() {
+      if (this.projectOperationBusy || this.composerSubmitting) return;
       if (this.fileOperationBusy) {
         this.showFileError(new Error("Wait for the current file operation to finish."));
         return;

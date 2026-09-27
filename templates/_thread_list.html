@@ -1,5 +1,6 @@
 <div class="space-y-1" aria-label="{{ 'Archived' if archived else 'Active' }} sessions">
   {% for thread in threads %}
+    {% set session_name = thread.custom_label or thread.name or thread.preview or "Untitled session" %}
     <div
       class="thread-list-item"
       :class='{ "thread-list-item-active": threadId === {{ thread.id|tojson }} }'
@@ -10,9 +11,8 @@
         @click='selectThread({{ thread.id|tojson }})'
       >
         <span class="flex min-w-0 items-center gap-2">
-          {% if thread.pinned %}<span title="Pinned" aria-label="Pinned">◆</span>{% endif %}
-          <span class="truncate text-sm font-medium text-slate-100">
-            {{ thread.custom_label or thread.name or thread.preview or "Untitled session" }}
+          <span class="truncate text-sm font-medium text-slate-100" title="{{ session_name }}">
+            {{ session_name }}
           </span>
         </span>
         <span
@@ -29,11 +29,19 @@
         <button
           type="button"
           class="session-actions-trigger"
-          aria-label="Session actions"
-          title="Session actions"
+          aria-label="{{ 'Pinned session actions' if thread.pinned else 'Session actions' }}"
+          title="{{ 'Pinned · Session actions' if thread.pinned else 'Session actions' }}"
           :aria-expanded='sessionActionsThreadId === {{ thread.id|tojson }}'
           @click.stop='sessionActionsThreadId = sessionActionsThreadId === {{ thread.id|tojson }} ? "" : {{ thread.id|tojson }}'
-        >•••</button>
+        >
+          {% if thread.pinned %}
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M16 3H8l1 7-3 3v3h12v-3l-3-3 1-7ZM12 16v5" />
+            </svg>
+          {% else %}
+            •••
+          {% endif %}
+        </button>
         <div
           x-cloak
           x-show='sessionActionsThreadId === {{ thread.id|tojson }}'
@@ -62,7 +70,9 @@
       </div>
     </div>
   {% else %}
-    <p class="empty-state">No {{ "archived " if archived else "" }}sessions in this project.</p>
+    {% if not cursor %}
+      <p class="empty-state">No {{ "archived " if archived else "" }}sessions in this project.</p>
+    {% endif %}
   {% endfor %}
   {% if next_cursor %}
     <button

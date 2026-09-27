@@ -166,3 +166,20 @@ def test_production_allows_an_empty_configured_root(tmp_path: Path) -> None:
     )
 
     assert registry.public_view() == []
+
+
+def test_project_mutations_reject_static_roots_and_symlinks(tmp_path: Path) -> None:
+    root = tmp_path / "projects"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (root / "link").symlink_to(outside, target_is_directory=True)
+    registry = ProjectRegistry.from_root(root)
+    for operation in (lambda: registry.rename("link", "renamed"), lambda: registry.delete("link")):
+        with pytest.raises(UnknownProjectError):
+            operation()
+    static_registry = ProjectRegistry([Project("outside", "Outside", outside)])
+    for operation in (lambda: static_registry.rename("outside", "renamed"), lambda: static_registry.delete("outside")):
+        with pytest.raises(ProjectRootNotConfiguredError):
+            operation()
+    assert outside.is_dir()

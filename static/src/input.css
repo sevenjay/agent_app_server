@@ -323,9 +323,12 @@
   }
 
   .project-button {
+    flex: 1;
     flex-direction: column;
+    min-width: 0;
   }
 
+  .project-list-item,
   .thread-list-item {
     border: 1px solid transparent;
     border-radius: 4px;
@@ -344,7 +347,7 @@
     text-align: left;
   }
 
-  .project-button:hover,
+  .project-list-item:hover,
   .thread-list-item:hover {
     background: var(--color-surface-800);
   }
@@ -363,11 +366,14 @@
   }
 
   .session-actions-trigger {
+    align-items: center;
     border-radius: 3px;
     color: oklch(0.65 0.02 250);
+    display: flex;
     font-family: var(--font-mono);
     font-size: 0.68rem;
     height: 1.5rem;
+    justify-content: center;
     letter-spacing: -0.08em;
     line-height: 1;
     width: 1.5rem;
@@ -377,6 +383,25 @@
   .session-actions-trigger[aria-expanded="true"] {
     background: var(--color-surface-700);
     color: white;
+  }
+
+  .project-actions-trigger {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .project-list-item:hover .project-actions-trigger,
+  .project-list-item:focus-within .project-actions-trigger,
+  .project-actions-trigger[aria-expanded="true"] {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  @media (hover: none), (pointer: coarse) {
+    .project-actions-trigger {
+      opacity: 1;
+      pointer-events: auto;
+    }
   }
 
   .session-actions-menu {

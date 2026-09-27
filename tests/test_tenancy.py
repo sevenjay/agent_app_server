@@ -170,3 +170,25 @@ async def test_single_user_ignores_proxy_headers_and_keeps_existing_layout(
     assert projects.status_code == 200
     assert projects.json()["data"][0]["path"] == str(project.resolve())
     assert not (root / "mallory").exists()
+
+
+@pytest.mark.asyncio
+async def test_project_mutations_only_change_the_current_tenants_directory(tmp_path: Path) -> None:
+    root = tmp_path / "tenant-workspaces"
+    alice_project = root / "rename-alice" / "workspace"
+    bob_project = root / "rename-bob" / "workspace"
+    alice_project.mkdir(parents=True)
+    bob_project.mkdir(parents=True)
+    (bob_project / "keep.txt").write_text("Bob's files", encoding="utf-8")
+    manager = TenantWorkspaceManager(mode="multi_tenant", base_root=root)
+    fake = FakeCodex(alice_project)
+    app = create_app(codex_client_factory=lambda: fake, codex_enabled=True, tenant_workspace_manager=manager)
+    alice = _headers("subject-rename-alice", "rename-alice")
+    bob = _headers("subject-rename-bob", "rename-bob")
+    async with application_client(app) as client:
+        renamed = await client.patch("/api/projects/workspace", json={"name": "renamed"}, headers=alice)
+        assert renamed.status_code == 200
+        assert (await client.get("/api/projects", headers=bob)).json()["data"][0]["path"] == str(bob_project)
+        assert (await client.delete("/api/projects/renamed", headers=bob)).status_code == 404
+        assert (await client.delete("/api/projects/renamed", headers=alice)).status_code == 204
+        assert (bob_project / "keep.txt").read_text(encoding="utf-8") == "Bob's files"

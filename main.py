@@ -20,7 +20,7 @@ from fastapi import Path as PathParameter
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.background import BackgroundTask
@@ -516,6 +516,60 @@ def create_app(
             f"project_key={project.key}"
         )
         return project.public_view()
+
+    @application.patch(
+        "/api/projects/{project_key}",
+        dependencies=[Depends(require_web_user)],
+    )
+    async def api_rename_project(
+        request: Request,
+        project_key: ProjectKey,
+        command: ProjectCreate,
+        session: AsyncSession = Depends(get_session),
+    ) -> dict[str, str]:
+        context = _web_user(request)
+        try:
+            project = await _service(request).rename_project(project_key, command.name)
+        except ProjectAlreadyExistsError as exc:
+            raise ConsoleProjectExists from exc
+        except InvalidProjectNameError as exc:
+            raise ConsoleBadRequest from exc
+        await session.execute(
+            update(ThreadUIMetadata)
+            .where(ThreadUIMetadata.tenant_id == context.tenant_id, ThreadUIMetadata.project_key == project_key)
+            .values(project_key=project.key)
+        )
+        selected = await session.get(AppSetting, (context.tenant_id, "selected_project_key"))
+        if selected is not None and selected.setting_value == project_key:
+            selected.setting_value = project.key
+        await session.commit()
+        return project.public_view()
+
+    @application.delete(
+        "/api/projects/{project_key}",
+        status_code=status.HTTP_204_NO_CONTENT,
+        dependencies=[Depends(require_web_user)],
+    )
+    async def api_delete_project(
+        request: Request,
+        project_key: ProjectKey,
+        session: AsyncSession = Depends(get_session),
+    ) -> Response:
+        context = _web_user(request)
+        await _service(request).delete_project(project_key)
+        await session.execute(
+            delete(ThreadUIMetadata).where(
+                ThreadUIMetadata.tenant_id == context.tenant_id, ThreadUIMetadata.project_key == project_key,
+            )
+        )
+        selected = await session.get(AppSetting, (context.tenant_id, "selected_project_key"))
+        if selected is not None and selected.setting_value == project_key:
+            await session.delete(selected)
+            selected_thread = await session.get(AppSetting, (context.tenant_id, "selected_thread_id"))
+            if selected_thread is not None:
+                await session.delete(selected_thread)
+        await session.commit()
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     def project_file_manager(request: Request, project_key: str) -> ProjectFileManager:
         try:
@@ -1352,12 +1406,42 @@ def create_app(
         session: AsyncSession = Depends(get_session),
     ):
         context = _web_user(request)
-        payload = await _service(request).list_threads(
+        service = _service(request)
+        payload = await service.list_threads(
             project_key=project_key,
             archived=archived,
             cursor=cursor,
             limit=30,
         )
+        pinned_ids = set(
+            await session.scalars(
+                select(ThreadUIMetadata.thread_id).where(
+                    ThreadUIMetadata.tenant_id == context.tenant_id,
+                    ThreadUIMetadata.project_key == project_key,
+                    ThreadUIMetadata.pinned.is_(True),
+                )
+            )
+        )
+        if cursor is None:
+            # Bring older pins onto the first page without changing the SDK cursor.
+            missing_pins = pinned_ids.difference(str(thread["id"]) for thread in payload["data"])
+            scan_cursor = payload["next_cursor"]
+            while missing_pins and scan_cursor:
+                page = await service.list_threads(
+                    project_key=project_key,
+                    archived=archived,
+                    cursor=scan_cursor,
+                    limit=100,
+                )
+                for thread in page["data"]:
+                    thread_id = str(thread["id"])
+                    if thread_id in missing_pins:
+                        payload["data"].append(thread)
+                        missing_pins.remove(thread_id)
+                scan_cursor = page["next_cursor"]
+        else:
+            # Pins are already visible at the top; omit them from appended pages.
+            payload["data"] = [thread for thread in payload["data"] if str(thread["id"]) not in pinned_ids]
         metadata = await _metadata_for_threads(
             session,
             context.tenant_id,
@@ -1375,6 +1459,7 @@ def create_app(
             }
             for thread in payload["data"]
         ]
+        threads.sort(key=lambda thread: not thread["pinned"])
         response = templates.TemplateResponse(
             request,
             "_thread_list.html",
@@ -1382,6 +1467,7 @@ def create_app(
                 "threads": threads,
                 "project_key": project_key,
                 "archived": archived,
+                "cursor": cursor,
                 "next_cursor": payload["next_cursor"],
             },
         )

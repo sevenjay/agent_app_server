@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import shutil
 from collections.abc import Iterable
 from dataclasses import dataclass
 from hashlib import sha256
@@ -286,6 +287,39 @@ class ProjectRegistry:
         if project is None:
             raise ProjectCreationError(project_name)
         return project
+
+    def _managed_project(self, key: str) -> Project:
+        if self._root is None:
+            raise ProjectRootNotConfiguredError
+        project = self.get(key)
+        if project.path.parent != self._root or project.path.is_symlink():
+            raise ProjectRegistryError("Project is not a direct directory beneath the configured root")
+        return project
+
+    def rename(self, key: str, name: str) -> Project:
+        name = _validate_project_name(name)
+        with self._lock:
+            project = self._managed_project(key)
+            target = project.path.with_name(name)
+            if target == project.path:
+                return project
+            if target.exists() or target.is_symlink():
+                raise ProjectAlreadyExistsError(name)
+            try:
+                project.path.rename(target)
+            except OSError as exc:
+                raise ProjectRegistryError("Project directory could not be renamed") from exc
+            self._replace(self._discover())
+            return self._by_path[target]
+
+    def delete(self, key: str) -> None:
+        with self._lock:
+            project = self._managed_project(key)
+            try:
+                shutil.rmtree(project.path)
+            except OSError as exc:
+                raise ProjectRegistryError("Project directory could not be deleted") from exc
+            self._replace(self._discover())
 
     def __bool__(self) -> bool:
         self.refresh()

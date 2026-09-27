@@ -11,6 +11,8 @@ Web UI 稱一段對話為 Session；API 與 Codex SDK 使用 Thread／`thread`�
 | `GET` | `/api/status` | Database、scheduler 與 Codex runtime health |
 | `GET` | `/api/projects` | 列出可見 Projects |
 | `POST` | `/api/projects` | 在設定的 root 建立一個 Project 目錄 |
+| `PATCH` | `/api/projects/{project_key}` | 以 `{"name": "新名稱"}` 實際更名專案目錄，更新 Sessions 的 CWD 與 UI metadata |
+| `DELETE` | `/api/projects/{project_key}` | 遞迴刪除專案目錄及其中檔案，清除選取狀態與 Session UI metadata |
 | `GET` | `/api/codex/account` | Codex account 與 usage limits |
 | `POST` | `/api/codex/rate-limit-reset-credits/consume` | 在 5h 或 Weekly limit 剩餘不超過 1% 時使用一張 reset credit |
 | `GET` | `/api/codex/models` | 可用 models 與 reasoning efforts |
@@ -18,6 +20,8 @@ Web UI 稱一段對話為 Session；API 與 Codex SDK 使用 Thread／`thread`�
 | `PATCH` | `/api/preferences` | 更新最後選擇的 Project／Thread |
 
 `POST /api/projects` 只接受單一目錄名稱。Browser 不會提交任意 absolute CWD。
+
+Projects 列在滑鼠 hover 或鍵盤 focus 時顯示三點選單，提供 Rename／Delete；觸控裝置持續顯示。更名與刪除僅支援設定 root 下的直接專案目錄，需要 Codex runtime 可用；專案有活動中的 Turn／Goal 時回 `409`。更名保留既有 Sessions（包括封存狀態），且不覆寫既有目錄。刪除前會顯示專案路徑並要求確認；刪除範圍包含專案內的 Journal 與附件，Codex 在專案外保存的 Thread 記錄不會一併刪除。
 
 ## Project files
 

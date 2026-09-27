@@ -552,20 +552,60 @@ async def test_new_unlisted_thread_can_refresh_every_panel_and_connect_sse(
 
 
 @pytest.mark.asyncio
-async def test_thread_partial_exposes_cursor_load_more() -> None:
+@pytest.mark.parametrize("archived", [False, True])
+async def test_thread_partial_prioritizes_pins_across_pages(archived: bool) -> None:
     application, fake = fake_application()
+    fake.threads.clear()
     for index in range(35):
-        thread_id = f"thr_page_{index}"
-        fake.threads[thread_id] = fake._thread(thread_id, name=f"Page {index}")
+        thread_id = f"thr_page_{archived}_{index}"
+        fake.threads[thread_id] = fake._thread(thread_id, name=f"Page {index}", archived=archived)
+
+    def rows(html: str) -> list[str]:
+        parser = ElementAttributeParser()
+        parser.feed(html)
+        return [
+            attrs["@click"]
+            for tag, attrs in parser.elements
+            if tag == "button" and attrs.get("class") == "thread-button"
+        ]
+
+    pins = [f"thr_page_{archived}_{index}" for index in (2, 33, 34)]
+    original_order = list(fake.threads)
+    params = {"project_key": "agent_app_server", "archived": archived}
     async with application_client(application) as client:
+        for thread_id in pins:
+            response = await client.patch(f"/api/codex/threads/{thread_id}", json={"pinned": True})
+            assert response.status_code == 200
         first = await client.get(
             "/partials/threads",
-            params={"project_key": "agent_app_server"},
+            params=params,
         )
         assert first.status_code == 200
         assert first.headers["cache-control"] == "no-store"
         assert "Load more sessions" in first.text
-        assert "cursor=" in first.text
+        expected_first = pins + [thread_id for thread_id in original_order[:30] if thread_id not in pins]
+        assert rows(first.text) == [f'selectThread("{thread_id}")' for thread_id in expected_first]
+
+        parser = ElementAttributeParser()
+        parser.feed(first.text)
+        next_url = next(attrs["hx-get"] for _, attrs in parser.elements if "hx-get" in attrs)
+        second = await client.get(next_url)
+        assert second.status_code == 200
+        assert rows(second.text) == [
+            f'selectThread("{thread_id}")' for thread_id in original_order[30:] if thread_id not in pins
+        ]
+        assert "Load more sessions" not in second.text
+
+        # A final page containing only promoted pins must not show a false empty state.
+        last = await client.get("/partials/threads", params={**params, "cursor": "33"})
+        assert rows(last.text) == []
+        assert "empty-state" not in last.text
+
+        for thread_id in pins:
+            response = await client.patch(f"/api/codex/threads/{thread_id}", json={"pinned": False})
+            assert response.status_code == 200
+        refreshed = await client.get("/partials/threads", params=params)
+        assert rows(refreshed.text) == [f'selectThread("{thread_id}")' for thread_id in original_order[:30]]
 
 
 @pytest.mark.asyncio

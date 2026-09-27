@@ -1,13 +1,38 @@
-<div class="space-y-1" aria-label="Registered projects">
+<div class="space-y-1" aria-label="Registered projects" @keydown.escape.window="projectActionsKey = ''">
   {% for project in projects %}
-    <button
-      type="button"
-      class="project-button"
+    <div
+      class="project-list-item"
       :class='{ "project-button-active": projectKey === {{ project.key|tojson }} }'
-      @click='selectProject({{ project.key|tojson }})'
     >
-      <span class="truncate text-sm font-medium text-slate-100">{{ project.name }}</span>
-    </button>
+      <button
+        type="button"
+        class="project-button"
+        @click='selectProject({{ project.key|tojson }})'
+      >
+        <span class="truncate text-sm font-medium text-slate-100" title="{{ project.name }}">{{ project.name }}</span>
+      </button>
+      <div class="session-actions" @click.outside='if (projectActionsKey === {{ project.key|tojson }}) projectActionsKey = ""'>
+        <button
+          type="button"
+          class="session-actions-trigger project-actions-trigger"
+          aria-label="Project actions"
+          title="Project actions"
+          aria-haspopup="menu"
+          :aria-expanded='projectActionsKey === {{ project.key|tojson }}'
+          @click.stop='projectActionsKey = projectActionsKey === {{ project.key|tojson }} ? "" : {{ project.key|tojson }}'
+        >•••</button>
+        <div
+          x-cloak
+          x-show='projectActionsKey === {{ project.key|tojson }}'
+          class="session-actions-menu"
+          role="menu"
+          aria-label="Project actions"
+        >
+          <button type="button" role="menuitem" :disabled="projectOperationBusy || composerSubmitting || fileOperationBusy" @click.stop='projectActionsKey = ""; renameProject({{ project.key|tojson }})'>Rename</button>
+          <button type="button" role="menuitem" class="session-actions-danger" :disabled="projectOperationBusy || composerSubmitting || fileOperationBusy" @click.stop='projectActionsKey = ""; deleteProject({{ project.key|tojson }})'>Delete</button>
+        </div>
+      </div>
+    </div>
   {% else %}
     <p class="empty-state">No projects yet. Create one with the ＋ button.</p>
   {% endfor %}

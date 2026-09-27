@@ -7,6 +7,7 @@ import json
 import time
 import uuid
 from collections.abc import Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -176,6 +177,7 @@ class CodexService:
         self._on_thread_authorized = on_thread_authorized
         self._pending_threads: dict[str, _PendingThread] = {}
         self._thread_projects: dict[str, Project] = {}
+        self._mutating_projects: set[str] = set()
         self._publish_lock = asyncio.Lock()
         self._recent_stream_fingerprints: dict[str, tuple[str, float]] = {}
         self._ignored_notification_threads: set[str] = set()
@@ -534,6 +536,8 @@ class CodexService:
             )
 
     def _project(self, project_key: str) -> Project:
+        if project_key in self._mutating_projects:
+            raise ConsoleConflict
         try:
             return self.registry.get(project_key)
         except UnknownProjectError as exc:
@@ -554,6 +558,98 @@ class CodexService:
         )
         data = to_primitive(response)
         return data if isinstance(data, dict) else {"data": data}
+
+    @asynccontextmanager
+    async def _project_mutation(self, project_key: str):
+        project = self._project(project_key)
+        self._mutating_projects.add(project_key)
+        reserved: list[str] = []
+        threads: dict[str, dict[str, Any]] = {}
+        try:
+            for archived in (False, True):
+                cursor = None
+                while True:
+                    response = await self._call(
+                        self.codex.thread_list(cwd=str(project.path), archived=archived, cursor=cursor, limit=100),
+                        operation="project_threads",
+                    )
+                    for thread in field(response, "data", ()):
+                        if self.registry.project_for_path(field(thread, "cwd", "")) == project:
+                            view = thread_view(thread, project_key=project.key)
+                            threads[str(view["id"])] = {**view, "archived": archived}
+                    cursor = field(response, "next_cursor")
+                    if not cursor:
+                        break
+            for thread_id, pending in self._pending_threads.items():
+                if pending.project == project:
+                    threads.setdefault(thread_id, {**pending.view, "archived": pending.archived})
+            for thread_id, thread in threads.items():
+                if self._thread_status(thread) in {"active", "running", "inprogress", "in_progress"}:
+                    raise ConsoleConflict
+                await self.turn_manager.reserve_mutation(thread_id, owner_id=self.tenant_id)
+                reserved.append(thread_id)
+            self._ignored_notification_threads.update(reserved)
+            yield project, threads
+        except TurnConflictError as exc:
+            raise ConsoleConflict from exc
+        finally:
+            self._ignored_notification_threads.difference_update(reserved)
+            for thread_id in reserved:
+                await self.turn_manager.finish_mutation(thread_id, owner_id=self.tenant_id)
+            self._mutating_projects.discard(project_key)
+
+    async def _move_thread_cwd(self, thread: dict[str, Any], project: Project) -> None:
+        thread_id = str(thread["id"])
+        archived = thread["archived"]
+        if archived:
+            await self._call(self.codex.thread_unarchive(thread_id), operation="project_thread_unarchive")
+        try:
+            handle = await self._call(
+                self.codex.thread_resume(
+                    thread_id, cwd=str(project.path), approval_mode=self.approval_mode, sandbox=self.sandbox,
+                ),
+                operation="project_thread_relocate",
+            )
+            response = await self._read_thread_handle(handle, include_turns=False, operation="project_thread_verify")
+            actual = field(response, "thread")
+            if str(field(actual, "id", "")) != thread_id or self.registry.project_for_path(field(actual, "cwd", "")) != project:
+                raise ConsoleUnavailable
+            self._register_thread_project(thread_id, project)
+            pending = self._pending_threads.get(thread_id)
+            if pending is not None:
+                pending.project = project
+                pending.handle = handle
+                pending.view = {**self._read_view(response, project), "archived": archived}
+        finally:
+            if archived:
+                await self._call(self.codex.thread_archive(thread_id), operation="project_thread_archive")
+
+    async def rename_project(self, project_key: str, name: str) -> Project:
+        async with self._project_mutation(project_key) as (original, threads):
+            renamed = await asyncio.to_thread(self.registry.rename, project_key, name)
+            if renamed == original:
+                return renamed
+            self._mutating_projects.add(renamed.key)
+            attempted: list[dict[str, Any]] = []
+            try:
+                for thread in threads.values():
+                    attempted.append(thread)
+                    await self._move_thread_cwd(thread, renamed)
+            except BaseException:
+                restored = await asyncio.to_thread(self.registry.rename, renamed.key, original.path.name)
+                for thread in attempted:
+                    await self._move_thread_cwd(thread, restored)
+                raise
+            finally:
+                self._mutating_projects.discard(renamed.key)
+            return renamed
+
+    async def delete_project(self, project_key: str) -> None:
+        async with self._project_mutation(project_key) as (_project, threads):
+            await asyncio.to_thread(self.registry.delete, project_key)
+            for thread_id in threads:
+                self._pending_threads.pop(thread_id, None)
+                self._thread_projects.pop(thread_id, None)
 
     async def list_threads(
         self,
@@ -611,6 +707,8 @@ class CodexService:
     async def _find_thread(self, thread_id: str) -> tuple[Project, Any]:
         pending = self._pending_threads.get(thread_id)
         if pending is not None:
+            if pending.project.key in self._mutating_projects:
+                raise ConsoleConflict
             LOGD(f"codex_thread_lookup_pending thread_id={thread_id} project_key={pending.project.key}")
             self._register_thread_project(thread_id, pending.project)
             return pending.project, pending.handle
@@ -642,6 +740,8 @@ class CodexService:
                             str(field(listed_thread, "id", "")) == thread_id
                             and self.registry.project_for_path(field(listed_thread, "cwd", "")) == project
                         ):
+                            if project.key in self._mutating_projects:
+                                raise ConsoleConflict
                             LOGD(
                                 f"codex_thread_lookup_found thread_id={thread_id} "
                                 f"project_key={project.key} archived={archived} "
@@ -666,6 +766,8 @@ class CodexService:
     ) -> tuple[Project, Any, Any]:
         LOGD(f"codex_thread_authorize_start thread_id={thread_id} include_turns={include_turns}")
         pending = self._pending_threads.get(thread_id)
+        if pending is not None and pending.project.key in self._mutating_projects:
+            raise ConsoleConflict
         if pending is not None and model is None and reasoning_effort is None:
             project = pending.project
             thread = pending.handle
