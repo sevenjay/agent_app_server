@@ -465,6 +465,109 @@ async def test_git_status_includes_staged_unstaged_renames_ignored_and_nested_ch
     assert ignored["data"][0]["git_status"] == "ignored"
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("root_repository", [False, True])
+async def test_git_status_aggregates_direct_child_repositories(tmp_path: Path, root_repository: bool) -> None:
+    if root_repository:
+        git(tmp_path, "init", "-b", "main")
+        (tmp_path / "root.txt").write_text("before")
+        (tmp_path / ".gitignore").write_text("clean/\n")
+        git(tmp_path, "add", ".")
+        git(tmp_path, "commit", "-m", "Initial root")
+        (tmp_path / "root.txt").write_text("after")
+
+    for name in ("clean", "modified repo", "新增 repo"):
+        repository = tmp_path / name
+        (repository / "src[1]/nested").mkdir(parents=True)
+        (repository / "src[1]/nested/file.txt").write_text("before")
+        (repository / ".gitignore").write_text("*.log\n")
+        git(repository, "init", "-b", "main")
+        git(repository, "add", ".")
+        git(repository, "commit", "-m", "Initial child")
+    (tmp_path / "clean/debug.log").write_text("ignored")
+    (tmp_path / "modified repo/src[1]/nested/file.txt").write_text("after")
+    (tmp_path / "新增 repo/added.txt").write_text("added")
+    git(tmp_path / "新增 repo", "add", "added.txt")
+    (tmp_path / "notes.txt").write_text("outside repositories")
+
+    base = "/api/projects/files_project/files"
+    async with application_client(file_application(tmp_path)) as client:
+        root = (await client.get(base)).json()
+        child = (await client.get(base, params={"path": "modified repo"})).json()
+        nested = (await client.get(base, params={"path": "modified repo/src[1]/nested"})).json()
+        clean = (await client.get(base, params={"path": "clean"})).json()
+
+    assert root["git_available"] is True
+    statuses = {entry["name"]: entry["git_status"] for entry in root["data"]}
+    assert statuses == {
+        "clean": None, "modified repo": "modified", "新增 repo": "added",
+        "notes.txt": "untracked" if root_repository else None,
+        **({"root.txt": "modified"} if root_repository else {}),
+    }
+    assert child["git_available"] is True
+    assert child["data"][0]["git_status"] == "modified"
+    assert nested["git_available"] is True
+    assert nested["data"][0]["git_status"] == "modified"
+    assert nested["data"][0]["git_status_code"] == " M"
+    assert {entry["name"]: entry["git_status"] for entry in clean["data"]} == {"src[1]": None, "debug.log": "ignored"}
+
+
+def test_git_repository_discovery_stops_after_direct_children(tmp_path: Path, monkeypatch) -> None:
+    # Neither an ancestor repository nor a repository two levels down is eligible.
+    git(tmp_path, "init", "-b", "main")
+    project = tmp_path / "project"
+    nested = project / "group/repo"
+    nested.mkdir(parents=True)
+    git(nested, "init", "-b", "main")
+    (nested / "file.txt").write_text("untracked")
+    (project / "linked_repo").symlink_to(nested, target_is_directory=True)
+    journal = project / ".stream_journal"
+    journal.mkdir()
+    git(journal, "init", "-b", "main")
+    manager = ProjectFileManager(Project("project", "Project", project))
+
+    def unexpected_git(*args, **kwargs):
+        pytest.fail("Git must not query repositories outside the allowed discovery depth")
+
+    monkeypatch.setattr("project_files.subprocess.run", unexpected_git)
+    for path in ("", "group", "group/repo"):
+        listing = manager.list_directory(path, show_hidden=True)
+        assert listing["git_available"] is False
+        assert all(entry["git_status"] is None for entry in listing["data"])
+    assert {entry["name"] for entry in manager.list_directory(show_hidden=True)["data"]} == {"group"}
+
+
+def test_git_child_worktrees_and_failed_repositories_are_independent(tmp_path: Path, monkeypatch) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    git(repository, "init", "-b", "main")
+    (repository / "file.txt").write_text("initial")
+    git(repository, "add", ".")
+    git(repository, "commit", "-m", "Initial")
+    worktree = tmp_path / "worktree"
+    git(repository, "worktree", "add", "-b", "worktree", str(worktree), "HEAD")
+    (worktree / "file.txt").write_text("modified")
+    (tmp_path / "broken/.git").mkdir(parents=True)
+    (tmp_path / "unreadable").mkdir()
+    exists = Path.exists
+
+    def marker_exists(path):
+        if path == tmp_path / "unreadable/.git":
+            raise PermissionError
+        return exists(path)
+
+    monkeypatch.setattr(Path, "exists", marker_exists)
+    manager = ProjectFileManager(Project("project", "Project", tmp_path))
+
+    listing = manager.list_directory()
+    assert listing["git_available"] is True
+    assert {entry["name"]: entry["git_status"] for entry in listing["data"]} == {
+        "repo": None, "worktree": "modified", "broken": None, "unreadable": None,
+    }
+    assert manager.list_directory("worktree")["data"][0]["git_status"] == "modified"
+    assert manager.list_directory("broken")["git_available"] is False
+
+
 def test_git_ignored_status_stays_on_ignored_entries_without_marking_ancestors(tmp_path: Path) -> None:
     git(tmp_path, "init", "-b", "main")
     (tmp_path / "src/nested").mkdir(parents=True)

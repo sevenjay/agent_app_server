@@ -43,7 +43,7 @@ File manager 拒絕 absolute path、path traversal、Windows-style separator、c
 
 `.stream_journal` 是保留區，即使 `show_hidden=true` 也不列出；Files API 拒絕存取、建立、覆寫、重新命名或刪除這棵目錄。
 
-列表回傳 `git_available`，每個項目附 `git_status`（`modified`、`added`、`deleted`、`renamed`、`conflicted`、`untracked`、`ignored` 或 `null`）及單檔的 `git_status_code`（Git porcelain XY）。目錄彙整後代變更；已刪除檔案透過仍存在的父目錄呈現。`ignored` 僅標示被忽略的檔案與目錄本身，不往上層彙整，並以稍灰的文字與圖示顯示。未變更或無法讀取 Git 狀態時為 `null`，不顯示標記。支援 `.git` 目錄及 worktree 的 `.git` 檔案；Git 不可用時仍可正常瀏覽檔案。
+列表回傳 `git_available`，每個項目附 `git_status`（`modified`、`added`、`deleted`、`renamed`、`conflicted`、`untracked`、`ignored` 或 `null`）及單檔的 `git_status_code`（Git porcelain XY）。僅在專案根目錄及其直接子目錄偵測 `.git`，不遞迴尋找更深層 repo；根目錄列表會彙整各子 repo 的狀態，進入已偵測 repo 的深層目錄仍可查看檔案狀態。若根目錄與子目錄皆為 repo，子 repo 以自己的 Git 狀態為準。目錄彙整後代變更；已刪除檔案透過仍存在的父目錄呈現。`ignored` 僅標示被忽略的檔案與目錄本身，不往上層彙整，並以稍灰的文字與圖示顯示。未變更或無法讀取 Git 狀態時為 `null`，不顯示標記。支援 `.git` 目錄及 worktree 的 `.git` 檔案；Git 不可用時仍可正常瀏覽檔案。
 
 Files 每列 hover／鍵盤 focus 時，依序顯示 Preview、Download、Rename、Delete、Info 圖示；觸控裝置持續顯示。Preview 在新分頁開啟；文字最多預覽 1 MiB，二進位或不支援的格式提供下載提示。Info 顯示路徑、類型、大小、修改時間與 Git 狀態。
 

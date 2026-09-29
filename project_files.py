@@ -29,6 +29,13 @@ PREVIEW_MEDIA_TYPES = {
 }
 
 
+def _has_git_marker(directory: Path) -> bool:
+    try:
+        return (directory / ".git").exists()
+    except OSError:
+        return False
+
+
 def _git_status(codes: set[str]) -> str | None:
     if codes & {"DD", "AU", "UD", "UA", "DU", "AA", "UU"}:
         return "conflicted"
@@ -294,7 +301,7 @@ class ProjectFileManager:
                 str(item["name"]),
             )
         )
-        git_available, git_codes = self._directory_git_status(directory)
+        git_available, git_codes = self._directory_git_status(directory, entries)
         for entry in entries:
             codes = git_codes.get(entry["name"], git_codes.get("", set()))
             entry["git_status"] = _git_status(codes)
@@ -305,18 +312,43 @@ class ProjectFileManager:
             "git_available": git_available,
         }
 
-    def _directory_git_status(self, directory: Path) -> tuple[bool, dict[str, set[str]]]:
+    def _directory_git_status(
+        self, directory: Path, entries: list[dict[str, Any]],
+    ) -> tuple[bool, dict[str, set[str]]]:
+        if directory != self.root:
+            child = self.root / directory.relative_to(self.root).parts[0]
+            repository = child if _has_git_marker(child) else self.root
+            return self._repository_git_status(directory, repository)
+
+        available, codes = self._repository_git_status(directory, self.root)
+        # Only discover repositories at the project root and in its direct children.
+        for entry in entries:
+            repository = self.root / entry["name"]
+            if entry["type"] != "directory" or not _has_git_marker(repository):
+                continue
+            child_available, child_codes = self._repository_git_status(repository, repository)
+            available = available or child_available
+            # The child repository owns its status, even if the parent Git repository
+            # sees it as untracked/ignored. Ignored contents do not mark the repo dirty.
+            codes[entry["name"]] = {code for values in child_codes.values() for code in values if code != "!!"}
+        return available, codes
+
+    def _repository_git_status(self, directory: Path, repository: Path) -> tuple[bool, dict[str, set[str]]]:
+        if not _has_git_marker(repository):
+            return False, {}
         # Porcelain -z preserves spaces, Unicode and rename source/destination paths.
         # Disable optional index writes and filesystem monitor hooks for this read.
-        command = ["git", "--no-optional-locks", "-c", "core.fsmonitor=false", "-C", str(directory)]
+        command = ["git", "--no-optional-locks", "--literal-pathspecs", "-c", "core.fsmonitor=false", "-C", str(repository)]
         environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
         try:
             top = subprocess.run(
                 [*command, "rev-parse", "--show-toplevel"], capture_output=True, timeout=3, check=True, env=environment,
             )
-            repository = Path(os.fsdecode(top.stdout.rstrip(b"\n")))
+            if Path(os.fsdecode(top.stdout.rstrip(b"\n"))) != repository:
+                return False, {}
+            pathspec = _relative_string(directory, repository) or "."
             result = subprocess.run(
-                [*command, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=matching", "--", "."],
+                [*command, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=matching", "--", pathspec],
                 capture_output=True, timeout=3, check=True, env=environment,
             )
         except (OSError, subprocess.SubprocessError):
