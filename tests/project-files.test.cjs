@@ -123,3 +123,87 @@ test("uploading into a folder refreshes its Git badge in the parent listing", as
   assert.equal(view.fileCurrentPath, "src");
   assert.equal(view.fileError, "");
 });
+
+test("deleted folders remain expandable but cannot be used for filesystem operations", async () => {
+  const view = consoleView({ TextEncoder });
+  view.projectKey = "project";
+  const folder = { name: "gone", path: "repo/gone", type: "directory", exists: false, git_status: "deleted" };
+  const file = { name: "old.txt", path: "repo/gone/old.txt", type: "file", exists: false, git_status: "deleted" };
+  view.fileDirectories = { "": [{ name: "repo", path: "repo", type: "directory" }], repo: [folder] };
+  view.fileExpandedPaths = ["repo"];
+  const requests = [];
+  view.api = async (url, options = {}) => {
+    assert.equal(options.method, undefined);
+    requests.push(url);
+    return { data: [file] };
+  };
+  await view.selectAndToggleFileFolder(folder);
+  assert.equal(view.fileCurrentPath, "repo/gone");
+  assert.equal(view.fileCurrentDirectoryMissing, true);
+  assert.equal(view.visibleFileEntries[2].path, file.path);
+  assert.equal(view.visibleFileEntries[2].exists, false);
+
+  await view.newProjectFolder();
+  await view.uploadProjectFiles({ currentTarget: { value: "file", files: [{ name: "new.txt" }] } });
+  for (const entry of [folder, file]) {
+    await view.downloadProjectFile(entry);
+    await view.renameProjectFile(entry);
+    await view.deleteProjectFile(entry);
+    const url = view.projectFileDiffUrl(entry);
+    assert.equal(new URLSearchParams(url.split("?")[1]).get("path"), entry.path);
+  }
+  assert.equal(requests.length, 1);
+  assert.equal(view.fileOperationBusy, false);
+  assert.equal(view.fileError, "");
+  const copied = [];
+  view.copyText = async path => copied.push(path);
+  await view.copyProjectFilePath(file);
+  assert.deepEqual(copied, [file.path]);
+
+  // Committing the deletion removes the virtual tree and its current selection on refresh.
+  view.api = async () => ({ data: [] });
+  await view.refreshProjectFiles();
+  assert.equal(view.visibleFileEntries.length, 0);
+  assert.equal(view.fileExpandedPaths.length, 0);
+  assert.equal(view.fileCurrentPath, "");
+  assert.equal(view.fileSelectedPath, "");
+  assert.equal(view.fileCurrentDirectoryMissing, false);
+});
+
+test("deleted rows show only diff, info and copy path; recreated files keep their actions", () => {
+  const html = readFileSync("static/index.html", "utf8");
+  const actions = html.split('class="file-tree-actions"')[1].split('</div>')[0];
+  const visibleActions = entry => [...actions.matchAll(/<(?:a|button)\b[^>]*>/g)]
+    .filter(([tag]) => {
+      const condition = tag.match(/x-show="([^"]+)"/);
+      return !condition || vm.runInNewContext(condition[1], { entry });
+    })
+    .map(([tag]) => tag.match(/title="([^"]+)"/)?.[1]);
+  assert.deepEqual(visibleActions({ exists: false }), ["View diff", "Info", "Copy path"]);
+  const live = visibleActions({ exists: true, git_status: "deleted" });
+  assert.ok(live.includes("Preview"));
+  assert.ok(live.includes("Rename"));
+  assert.ok(live.includes("Delete"));
+  assert.ok(!live.includes("View diff"));
+  const view = consoleView();
+  view.projectKey = "project";
+  assert.ok(view.projectFileDiffUrl({ path: "recreated.txt", exists: true, git_status: "deleted" }));
+  view.fileDirectories = { "": [{ path: "src", type: "directory", exists: true, git_status: "deleted" }] };
+  view.fileCurrentPath = "src";
+  assert.equal(view.fileCurrentDirectoryMissing, false);
+});
+
+test("deleted item labels distinguish missing entries, staged states and repository ownership", () => {
+  const view = consoleView();
+  view.projectKey = "project";
+  view.projects = [{ key: "project", path: "/workspace" }];
+  const entry = { type: "file", exists: false, git_status: "deleted", git_repository: "backend" };
+  assert.equal(view.fileGitMarker(entry), "D");
+  assert.equal(view.fileGitLabel({ ...entry, git_status_code: " D" }), "Git: Deleted (unstaged)");
+  assert.equal(view.fileGitLabel({ ...entry, git_status_code: "D " }), "Git: Deleted (staged)");
+  assert.equal(view.fileGitLabel({ ...entry, type: "directory", git_staged: true, git_unstaged: true }),
+    "Git: Deleted (staged and unstaged)");
+  assert.equal(view.fileGitLabel({ ...entry, type: "directory", exists: true }), "Git: Deleted contents");
+  assert.equal(view.fileGitRepositoryLabel(entry), "backend");
+  assert.equal(view.fileGitRepositoryLabel({ git_repository: "" }), "/workspace");
+});

@@ -16,9 +16,12 @@
         </div>
         <nav aria-label="Diff actions">
           <a class="button-secondary" href="">Refresh diff</a>
-          <a class="button-secondary" href="{{ preview_url }}">Preview</a>
+          {% if entry.exists %}<a class="button-secondary" href="{{ preview_url }}">Preview</a>{% endif %}
         </nav>
       </header>
+      {% if not entry.exists %}
+      <p class="file-preview-notice">This {{ 'folder' if entry.type == 'directory' else 'file' }} is missing from the working tree. The diff shows its Git changes before deletion.</p>
+      {% endif %}
       {% if not has_changes %}
       <p class="file-preview-notice">No staged or unstaged changes for this item. It may have been committed or reverted since the file list was loaded.</p>
       {% endif %}

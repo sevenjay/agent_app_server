@@ -11,6 +11,8 @@ import stat
 import subprocess
 import tempfile
 import zipfile
+from contextlib import nullcontext
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +36,14 @@ def _has_git_marker(directory: Path) -> bool:
         return (directory / ".git").exists()
     except OSError:
         return False
+
+
+@dataclass
+class _DirectoryGitStatus:
+    available: bool = False
+    repository: Path | None = None
+    codes: dict[str, set[str]] = field(default_factory=dict)
+    deleted: dict[str, str] = field(default_factory=dict)
 
 
 def _git_status(codes: set[str]) -> str | None:
@@ -197,7 +207,7 @@ class ProjectFileManager:
             raise ProjectFileNotFoundError
         self.root = root
 
-    def _existing_path(self, relative_path: str, *, allow_root: bool = True) -> Path:
+    def _existing_path(self, relative_path: str, *, allow_root: bool = True, allow_missing: bool = False) -> Path:
         parts = _relative_parts(relative_path, allow_root=allow_root)
         current = self.root
         for part in parts:
@@ -205,6 +215,8 @@ class ProjectFileManager:
             try:
                 metadata = current.lstat()
             except FileNotFoundError as exc:
+                if allow_missing:
+                    continue
                 raise ProjectFileNotFoundError from exc
             except PermissionError as exc:
                 raise ProjectFilePermissionError from exc
@@ -256,6 +268,7 @@ class ProjectFileManager:
             "type": item_type,
             "size": size,
             "modified_at": metadata.st_mtime_ns // 1_000_000,
+            "exists": True,
         }
 
     def list_directory(
@@ -264,10 +277,13 @@ class ProjectFileManager:
         *,
         show_hidden: bool = False,
     ) -> dict[str, Any]:
-        directory = self._directory(relative_path)
+        directory = self._existing_path(relative_path, allow_missing=True)
+        exists = directory.exists()
+        if exists:
+            directory = self._directory(relative_path)
         entries: list[dict[str, Any]] = []
         try:
-            with os.scandir(directory) as iterator:
+            with (os.scandir(directory) if exists else nullcontext(())) as iterator:
                 for directory_entry in iterator:
                     if directory == self.root and directory_entry.name == ".stream_journal":
                         continue
@@ -294,6 +310,25 @@ class ProjectFileManager:
         except OSError as exc:
             raise ProjectFileError from exc
 
+        git = self._directory_git_status(directory, entries)
+        if not exists and not git.deleted:
+            raise ProjectFileNotFoundError
+        for name, item_type in git.deleted.items():
+            if not show_hidden and name.startswith("."):
+                continue
+            path = directory / name
+            try:
+                _validate_name(name)
+                self._existing_path(_relative_string(path, self.root))
+            except ProjectFileNotFoundError:
+                entries.append({
+                    "name": name, "path": _relative_string(path, self.root), "type": item_type,
+                    "size": None, "modified_at": None, "exists": False,
+                })
+            except ProjectFileError:
+                # Never turn an inaccessible or disallowed filesystem entry into a Git row.
+                continue
+
         entries.sort(
             key=lambda item: (
                 item["type"] != "directory",
@@ -301,41 +336,51 @@ class ProjectFileManager:
                 str(item["name"]),
             )
         )
-        git_available, git_codes = self._directory_git_status(directory, entries)
         for entry in entries:
-            codes = git_codes.get(entry["name"], git_codes.get("", set()))
+            codes = git.codes.get(entry["name"], git.codes.get("", set()))
             entry["git_status"] = _git_status(codes)
-            entry["git_status_code"] = next(iter(codes)) if len(codes) == 1 and entry["type"] == "file" else None
+            tracked_codes = codes - {"??", "!!"}
+            status_codes = tracked_codes or codes
+            entry["git_status_code"] = next(iter(status_codes)) if len(status_codes) == 1 else None
+            entry["git_staged"] = any(code[0] != " " for code in tracked_codes)
+            entry["git_unstaged"] = any(code[1] != " " for code in tracked_codes)
+            entry.setdefault("git_repository", _relative_string(git.repository, self.root) if git.repository else None)
         return {
             "path": _relative_string(directory, self.root),
             "data": entries,
-            "git_available": git_available,
+            "git_available": git.available,
         }
+
+    def _git_repository(self, directory: Path) -> Path:
+        if directory != self.root:
+            child = self.root / directory.relative_to(self.root).parts[0]
+            if _has_git_marker(child):
+                return child
+        return self.root
 
     def _directory_git_status(
         self, directory: Path, entries: list[dict[str, Any]],
-    ) -> tuple[bool, dict[str, set[str]]]:
+    ) -> _DirectoryGitStatus:
+        status = self._repository_git_status(directory, self._git_repository(directory))
         if directory != self.root:
-            child = self.root / directory.relative_to(self.root).parts[0]
-            repository = child if _has_git_marker(child) else self.root
-            return self._repository_git_status(directory, repository)
+            return status
 
-        available, codes = self._repository_git_status(directory, self.root)
         # Only discover repositories at the project root and in its direct children.
         for entry in entries:
             repository = self.root / entry["name"]
             if entry["type"] != "directory" or not _has_git_marker(repository):
                 continue
-            child_available, child_codes = self._repository_git_status(repository, repository)
-            available = available or child_available
+            child = self._repository_git_status(repository, repository)
+            status.available = status.available or child.available
+            entry["git_repository"] = entry["path"] if child.available else None
             # The child repository owns its status, even if the parent Git repository
             # sees it as untracked/ignored. Ignored contents do not mark the repo dirty.
-            codes[entry["name"]] = {code for values in child_codes.values() for code in values if code != "!!"}
-        return available, codes
+            status.codes[entry["name"]] = {code for values in child.codes.values() for code in values if code != "!!"}
+        return status
 
-    def _repository_git_status(self, directory: Path, repository: Path) -> tuple[bool, dict[str, set[str]]]:
+    def _repository_git_status(self, directory: Path, repository: Path) -> _DirectoryGitStatus:
         if not _has_git_marker(repository):
-            return False, {}
+            return _DirectoryGitStatus()
         # Porcelain -z preserves spaces, Unicode and rename source/destination paths.
         # Disable optional index writes and filesystem monitor hooks for this read.
         command = ["git", "--no-optional-locks", "--literal-pathspecs", "-c", "core.fsmonitor=false", "-C", str(repository)]
@@ -345,20 +390,26 @@ class ProjectFileManager:
                 [*command, "rev-parse", "--show-toplevel"], capture_output=True, timeout=3, check=True, env=environment,
             )
             if Path(os.fsdecode(top.stdout.rstrip(b"\n"))) != repository:
-                return False, {}
-            pathspec = _relative_string(directory, repository) or "."
+                return _DirectoryGitStatus()
+            # Read the whole repository so a rename across folders is not mistaken
+            # for a deletion when viewing only the source folder.
             result = subprocess.run(
-                [*command, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=matching", "--", pathspec],
+                [*command, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=matching"],
                 capture_output=True, timeout=3, check=True, env=environment,
             )
         except (OSError, subprocess.SubprocessError):
             # Git is optional; an unavailable repository must not break file browsing.
-            return False, {}
+            return _DirectoryGitStatus()
 
         codes: dict[str, set[str]] = {}
+        deleted: dict[str, str] = {}
 
-        def record(path: bytes, code: str) -> None:
+        def record(path: bytes, code: str, *, rename_source: bool = False) -> None:
             target = repository / os.fsdecode(path)
+            try:
+                _relative_parts(_relative_string(target, self.root), allow_root=False)
+            except (ProjectFileError, ValueError):
+                return
             try:
                 relative = target.relative_to(directory)
             except ValueError:
@@ -372,6 +423,8 @@ class ProjectFileManager:
                 if code == "!!" and len(relative.parts) > 1:
                     return
                 codes.setdefault(relative.parts[0], set()).add(code)
+                if "D" in code and not rename_source:
+                    deleted[relative.parts[0]] = "directory" if len(relative.parts) > 1 else "file"
 
         records = iter(result.stdout.split(b"\0"))
         for item in records:
@@ -382,17 +435,25 @@ class ProjectFileManager:
             if "R" in code or "C" in code:
                 original = next(records, b"")
                 if "R" in code:
-                    record(original, " D")
-        return True, codes
+                    record(original, code.replace("R", "D"), rename_source=True)
+        return _DirectoryGitStatus(available=True, repository=repository, codes=codes, deleted=deleted)
 
     def diff(self, relative_path: str) -> dict[str, Any]:
-        target = self._existing_path(relative_path, allow_root=False)
-        entry = self._entry(target)
-        directory = target if entry["type"] == "directory" else target.parent
-        pathspec = "." if entry["type"] == "directory" else target.name
+        target = self._existing_path(relative_path, allow_root=False, allow_missing=True)
+        try:
+            entry = self._entry(target)
+        except ProjectFileNotFoundError:
+            listing = self.list_directory(_relative_string(target.parent, self.root), show_hidden=True)
+            entry = next((item for item in listing["data"] if item["path"] == relative_path), None)
+            if entry is None:
+                raise ProjectFileNotFoundError
+        repository = self._git_repository(target if entry["type"] == "directory" else target.parent)
+        if not _has_git_marker(repository):
+            raise ProjectGitDiffError
+        pathspec = _relative_string(target, repository) or "."
         command = [
             "git", "--no-optional-locks", "--literal-pathspecs", "-c", "core.fsmonitor=false",
-            "-c", "core.quotePath=false", "-C", str(directory), "diff",
+            "-c", "core.quotePath=false", "-C", str(repository), "diff",
             "--no-ext-diff", "--no-textconv", "--no-color", "--no-renames", "--no-relative",
             "--src-prefix=a/", "--dst-prefix=b/", "--unified=3",
         ]

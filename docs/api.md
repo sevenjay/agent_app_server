@@ -43,11 +43,13 @@ File manager 拒絕 absolute path、path traversal、Windows-style separator、c
 
 `.stream_journal` 是保留區，即使 `show_hidden=true` 也不列出；Files API 拒絕存取、建立、覆寫、重新命名或刪除這棵目錄。
 
-列表回傳 `git_available`，每個項目附 `git_status`（`modified`、`added`、`deleted`、`renamed`、`conflicted`、`untracked`、`ignored` 或 `null`）及單檔的 `git_status_code`（Git porcelain XY）。僅在專案根目錄及其直接子目錄偵測 `.git`，不遞迴尋找更深層 repo；根目錄列表會彙整各子 repo 的狀態，進入已偵測 repo 的深層目錄仍可查看檔案狀態。若根目錄與子目錄皆為 repo，子 repo 以自己的 Git 狀態為準。目錄彙整後代變更；已刪除檔案透過仍存在的父目錄呈現。`ignored` 僅標示被忽略的檔案與目錄本身，不往上層彙整，並以稍灰的文字與圖示顯示。未變更或無法讀取 Git 狀態時為 `null`，不顯示標記。支援 `.git` 目錄及 worktree 的 `.git` 檔案；Git 不可用時仍可正常瀏覽檔案。
+列表回傳 `git_available`，每個項目附 `git_status`（`modified`、`added`、`deleted`、`renamed`、`conflicted`、`untracked`、`ignored` 或 `null`）、`git_status_code`（僅有一組 Git porcelain XY 時回傳）、`git_staged` 與 `git_unstaged`。`git_repository` 是 repo 相對專案根目錄的路徑；根目錄 repo 為空字串，無可用 repo 時為 `null`。僅在專案根目錄及其直接子目錄偵測 `.git`，不遞迴尋找更深層 repo；根目錄列表會彙整各子 repo 的狀態，進入已偵測 repo 的深層目錄仍可查看檔案狀態。若根目錄與子目錄皆為 repo，子 repo 以自己的 Git 狀態為準。目錄彙整後代變更。`ignored` 僅標示被忽略的檔案與目錄本身，不往上層彙整，並以稍灰的文字與圖示顯示。未變更或無法讀取 Git 狀態時為 `null`，不顯示標記。支援 `.git` 目錄及 worktree 的 `.git` 檔案；Git 不可用時仍可正常瀏覽檔案。
 
-Files 每列 hover／鍵盤 focus 時，依序顯示 Preview、Download、Rename、Delete、Info 圖示；觸控裝置持續顯示。Preview 在新分頁開啟；文字最多預覽 1 MiB，二進位或不支援的格式提供下載提示。Info 顯示路徑、類型、大小、修改時間與 Git 狀態。
+列表以 `exists` 區分實際存在與已消失的項目。Git 回報刪除且已不存在的檔案，會在原本位置以刪除線與紅色 `D` 顯示；整個目錄消失時補上可展開的目錄列，`size` 與 `modified_at` 為 `null`。仍存在的父目錄僅彙整 Git 狀態，不加刪除線。同一路徑若重新建立，保留實際檔案或目錄；Git 辨識的 rename 不額外建立舊路徑的刪除列。這些項目沿用排序與 Show hidden 設定，刪除 commit 後重新整理即消失。
 
-Modified 狀態標記與 Info 中的 Git 文字可點擊，在新分頁顯示該檔案或目錄的 diff。頁面保留編輯前後行號，以紅／綠色區分刪除／新增，並分開列出已暫存與尚未暫存的變更；二進位檔顯示 Git 的差異提示。每區最多顯示 2 MiB，超出時提示改選個別檔案。讀取 diff 不執行 Git external diff 或 textconv。
+Files 每列 hover／鍵盤 focus 時，依序顯示 Preview、Download、Rename、Delete、Info、Copy path 圖示；觸控裝置持續顯示。已不存在的項目僅提供 View diff、Info、Copy path；選取已刪除目錄時停用 Upload 與 New folder。Preview 在新分頁開啟；文字最多預覽 1 MiB，二進位或不支援的格式提供下載提示。Info 顯示路徑、類型、大小、修改時間、所屬 repo 與 Git 狀態。
+
+Modified、Deleted 狀態標記與 Info 中的 Git 文字可點擊，在新分頁顯示該檔案或目錄的 diff，包含 Git 仍回報的已刪除檔案與整個目錄。不存在且 Git 未回報刪除的路徑仍回傳 404；原有 filesystem 操作不接受已不存在的項目。頁面保留編輯前後行號，以紅／綠色區分刪除／新增，並分開列出已暫存與尚未暫存的變更；二進位檔顯示 Git 的差異提示。每區最多顯示 2 MiB，超出時提示改選個別檔案。讀取 diff 不執行 Git external diff 或 textconv。
 
 ## 對話附件
 

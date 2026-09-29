@@ -2129,6 +2129,16 @@
     color: oklch(0.61 0.02 250);
   }
 
+  .file-tree-missing .file-tree-name,
+  .file-preview-directory li[data-exists="false"] .file-preview-name {
+    color: oklch(0.72 0.015 250);
+    text-decoration: line-through;
+  }
+
+  .file-tree-missing .file-tree-icon {
+    color: oklch(0.61 0.02 250);
+  }
+
   .file-tree-name {
     font-family: var(--font-mono);
     font-size: 0.74rem;

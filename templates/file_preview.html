@@ -57,13 +57,13 @@
       {% if kind == 'directory' %}
       <ul class="file-preview-directory" aria-label="Folder contents">
         {% for child in data %}
-        <li data-status="{{ child.git_status or '' }}">
-          <a href="{{ preview_url(child.path) }}">
+        <li data-status="{{ child.git_status or '' }}" data-exists="{{ 'true' if child.exists else 'false' }}">
+          <a href="{{ preview_url(child.path) if child.exists else diff_url(child.path) }}"{% if not child.exists %} target="_blank" rel="noopener noreferrer" title="Missing from working tree — View diff (opens in a new tab)"{% endif %}>
             <span aria-hidden="true">{{ '▰' if child.type == 'directory' else '▤' }}</span>
-            <span>{{ child.name }}{{ '/' if child.type == 'directory' else '' }}</span>
+            <span class="file-preview-name">{{ child.name }}{{ '/' if child.type == 'directory' else '' }}</span>
           </a>
-          {% if child.git_status == 'modified' %}
-          <a class="file-git-status" data-status="modified" href="{{ diff_url(child.path) }}" target="_blank" rel="noopener noreferrer" title="Git: Modified — View diff (opens in a new tab)">modified</a>
+          {% if child.git_status in ['modified', 'deleted'] or not child.exists %}
+          <a class="file-git-status" data-status="{{ child.git_status }}" href="{{ diff_url(child.path) }}" target="_blank" rel="noopener noreferrer" title="Git: {{ child.git_status }} — View diff (opens in a new tab)">{{ child.git_status }}</a>
           {% elif child.git_status %}<span class="file-git-status" data-status="{{ child.git_status }}" title="Git: {{ child.git_status }}">{{ child.git_status }}</span>{% endif %}
         </li>
         {% else %}<li class="files-tree-message">This folder is empty.</li>{% endfor %}

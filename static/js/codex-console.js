@@ -368,6 +368,10 @@ window.codexConsole = function codexConsole() {
       return this.fileEntryForPath(this.fileSelectedPath);
     },
 
+    get fileCurrentDirectoryMissing() {
+      return this.fileEntryForPath(this.fileCurrentPath)?.exists === false;
+    },
+
     async init() {
       this.restoreModelSettings();
       try {
@@ -948,7 +952,7 @@ window.codexConsole = function codexConsole() {
     },
 
     async newProjectFolder() {
-      if (!this.projectKey || this.fileOperationBusy) return;
+      if (!this.projectKey || this.fileOperationBusy || this.fileCurrentDirectoryMissing) return;
       const requestedName = window.prompt("New folder name");
       if (requestedName === null) return;
       const name = requestedName.trim();
@@ -980,7 +984,7 @@ window.codexConsole = function codexConsole() {
       const input = event.currentTarget;
       const files = [...(input.files || [])];
       input.value = "";
-      if (!files.length || !this.projectKey || this.fileOperationBusy) return;
+      if (!files.length || !this.projectKey || this.fileOperationBusy || this.fileCurrentDirectoryMissing) return;
       const parent = this.fileCurrentPath;
       this.fileOperationBusy = true;
       this.fileError = "";
@@ -1044,7 +1048,7 @@ window.codexConsole = function codexConsole() {
     },
 
     projectFileDiffUrl(entry) {
-      return entry.git_status === "modified"
+      return ["modified", "deleted"].includes(entry.git_status) || entry.exists === false
         ? this.projectFilesUrl("/diff", { path: entry.path })
         : null;
     },
@@ -1054,13 +1058,20 @@ window.codexConsole = function codexConsole() {
       const label = labels[entry.git_status];
       if (!label) return "";
       if (entry.git_status === "ignored") return `Git: ${label}`;
-      if (entry.type === "directory") return `Git: ${label} contents`;
+      if (entry.type === "directory" && entry.exists !== false) return `Git: ${label} contents`;
       if (entry.git_status === "conflicted") return `Git: ${label}`;
       const code = entry.git_status_code;
-      const state = !code || code === "??" || code === "!!" ? ""
-        : code[0] !== " " && code[1] !== " " ? " (staged and unstaged)"
-        : code[0] !== " " ? " (staged)" : " (unstaged)";
+      const tracked = code && code !== "??" && code !== "!!";
+      const staged = entry.git_staged ?? (tracked && code[0] !== " ");
+      const unstaged = entry.git_unstaged ?? (tracked && code[1] !== " ");
+      const state = staged && unstaged ? " (staged and unstaged)"
+        : staged ? " (staged)" : unstaged ? " (unstaged)" : "";
       return `Git: ${label}${state}`;
+    },
+
+    fileGitRepositoryLabel(entry) {
+      if (entry.git_repository === null || entry.git_repository === undefined) return "—";
+      return entry.git_repository || this.selectedProjectPath || "Project root";
     },
 
     formatFileSize(size) {
@@ -1095,6 +1106,7 @@ window.codexConsole = function codexConsole() {
     async downloadProjectFile(entry = this.selectedFileEntry) {
       if (
         !entry ||
+        entry.exists === false ||
         !this.projectKey ||
         this.fileOperationBusy
       ) return;
@@ -1140,7 +1152,7 @@ window.codexConsole = function codexConsole() {
     },
 
     async renameProjectFile(entry) {
-      if (!entry || !this.projectKey || this.fileOperationBusy) return;
+      if (!entry || entry.exists === false || !this.projectKey || this.fileOperationBusy) return;
       const requestedName = window.prompt("New name", entry.name);
       if (requestedName === null) return;
       const name = requestedName.trim();
@@ -1188,7 +1200,7 @@ window.codexConsole = function codexConsole() {
     },
 
     async deleteProjectFile(entry) {
-      if (!entry || !this.projectKey || this.fileOperationBusy) return;
+      if (!entry || entry.exists === false || !this.projectKey || this.fileOperationBusy) return;
       const detail = entry.type === "directory"
         ? " and everything inside it"
         : "";
