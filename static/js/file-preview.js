@@ -183,7 +183,8 @@
   const copyButton = document.getElementById("file-copy-raw");
   copyButton.disabled = false;
   copyButton.addEventListener("click", async () => {
-    copyButton.disabled = true;
+    if (busy || editing) return;
+    setBusy(true);
     status.textContent = "Copying…";
     try {
       // Fetch the original file so truncated previews and CRLF retain their full raw text.
@@ -200,7 +201,118 @@
     } catch {
       status.textContent = "Could not copy raw content. Try again or download the file.";
     } finally {
-      copyButton.disabled = false;
+      setBusy(false);
     }
+  });
+
+  const editButton = document.getElementById("file-edit");
+  const saveButton = document.getElementById("file-save");
+  const cancelButton = document.getElementById("file-cancel-edit");
+  const editor = document.getElementById("file-editor");
+  const truncatedNotice = document.getElementById("file-preview-truncated");
+  let editing = false;
+  let busy = false;
+  let originalText = "";
+  let lineEnding = "\n";
+  let hasBOM = false;
+  let previewWasVisible = false;
+  let previewWasEnabled = false;
+
+  function setBusy(value) {
+    busy = value;
+    editButton.disabled = value;
+    saveButton.disabled = value;
+    cancelButton.disabled = value;
+    editor.readOnly = value;
+    copyButton.disabled = value || editing;
+  }
+
+  function showEditing(value) {
+    editing = value;
+    editor.hidden = !value;
+    editButton.hidden = value;
+    saveButton.hidden = !value;
+    cancelButton.hidden = !value;
+    plain.hidden = value || previewWasVisible;
+    if (rendered) {
+      rendered.hidden = value || !previewWasVisible;
+      previewTab.disabled = value || !previewWasEnabled;
+      plainTab.disabled = value;
+    }
+    if (truncatedNotice) truncatedNotice.hidden = value;
+    setBusy(false);
+  }
+
+  editButton.disabled = false;
+  editButton.addEventListener("click", async () => {
+    if (busy || editing) return;
+    setBusy(true);
+    status.textContent = "Loading file for editing…";
+    try {
+      // Always read the entire file, including bytes beyond the preview limit.
+      const response = await fetch(document.getElementById("file-download").href, { credentials: "same-origin", cache: "no-store" });
+      if (!response.ok) throw new Error("The file could not be read. Try again.");
+      const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(await response.arrayBuffer());
+      if (/[\u0000-\u0008\u000b\u000e-\u001f]/.test(text)) throw new Error("This file contains binary content.");
+      hasBOM = text.startsWith("\uFEFF");
+      const content = hasBOM ? text.slice(1) : text;
+      lineEnding = content.match(/\r\n|\r|\n/)?.[0] || "\n";
+      originalText = content.replace(/\r\n?/g, "\n");
+      editor.value = originalText;
+      previewWasVisible = Boolean(rendered && !rendered.hidden);
+      previewWasEnabled = Boolean(previewTab && !previewTab.disabled);
+      showEditing(true);
+      status.textContent = "Editing. Save to update the file.";
+      editor.focus();
+    } catch (error) {
+      status.textContent = "Could not open file for editing. " + (error.message || "Try again.");
+    } finally {
+      setBusy(false);
+    }
+  });
+
+  cancelButton.addEventListener("click", () => {
+    if (busy) return;
+    showEditing(false);
+    editor.value = "";
+    status.textContent = "Editing cancelled.";
+    editButton.focus();
+  });
+
+  saveButton.addEventListener("click", async () => {
+    if (busy || !editing) return;
+    const text = editor.value.replace(/\r\n?/g, "\n");
+    if (text === originalText) {
+      showEditing(false);
+      status.textContent = "No changes to save.";
+      editButton.focus();
+      return;
+    }
+    setBusy(true);
+    status.textContent = "Saving…";
+    try {
+      const response = await fetch(saveButton.dataset.saveUrl, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: new TextEncoder().encode((hasBOM ? "\uFEFF" : "") + text.replace(/\n/g, lineEnding)),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        throw new Error(data?.error?.message || "Try again.");
+      }
+      editing = false;
+      status.textContent = "File saved.";
+      window.location.reload();
+    } catch (error) {
+      status.textContent = "Could not save file. " + (error.message || "Try again.");
+      setBusy(false);
+    }
+  });
+
+  window.addEventListener("beforeunload", (event) => {
+    if (!editing || (!busy && editor.value === originalText)) return;
+    event.preventDefault();
+    event.returnValue = "";
   });
 })();

@@ -146,10 +146,10 @@ class ProjectGitDiffError(ProjectFileError):
     safe_message = "Git changes could not be read. Refresh the file list and try again."
 
 
-def _validate_name(value: str) -> str:
-    name = value.strip()
+def _validate_name(value: str, *, strip: bool = True) -> str:
+    name = value.strip() if strip else value
     if (
-        not name
+        not name.strip()
         or name in {".", ".."}
         or "/" in name
         or "\\" in name
@@ -596,7 +596,7 @@ class ProjectFileManager:
         overwrite: bool = False,
     ) -> dict[str, Any]:
         parent = self._directory(parent_path)
-        target = parent / _validate_name(name)
+        target = parent / _validate_name(name, strip=not overwrite)
         if parent == self.root and target.name == ".stream_journal":
             raise InvalidFilePathError
         try:
@@ -626,6 +626,9 @@ class ProjectFileManager:
                 descriptor = -1
                 destination.write(content)
                 destination.flush()
+                if existing is not None:
+                    # Editing an existing file must retain permissions, including executable bits.
+                    os.fchmod(destination.fileno(), stat.S_IMODE(existing.st_mode))
                 os.fsync(destination.fileno())
             if overwrite:
                 os.replace(temporary_name, target)

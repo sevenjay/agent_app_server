@@ -15,10 +15,15 @@ function element(extra = {}) {
   };
 }
 
-function setup({ markdown = false, filename = "app.py", renderer = true, clipboard = true, fetchOK = true, copyOK = true, mermaid, diagrams = [], highlighter = true, loadScript = (script) => queueMicrotask(() => script.onerror()), timers = { setTimeout, clearTimeout } } = {}) {
+function setup({ markdown = false, filename = "app.py", renderer = true, clipboard = true, fetchOK = true, copyOK = true, mermaid, diagrams = [], highlighter = true, download = "# Full raw file\r\nwith unseen content\r\n", saveResponse = { ok: true }, loadScript = (script) => queueMicrotask(() => script.onerror()), timers = { setTimeout, clearTimeout } } = {}) {
   const nodes = Object.fromEntries(["source", "plain", "status"].map((id) => [`file-preview-${id}`, element()]));
   nodes["file-preview-source"].textContent = "<script>raw</script>\n";
   nodes["file-copy-raw"] = element();
+  nodes["file-edit"] = element({ disabled: true });
+  nodes["file-save"] = element({ hidden: true, dataset: { saveUrl: "/files/upload?path=docs&name=app.py&overwrite=true" } });
+  nodes["file-cancel-edit"] = element({ hidden: true });
+  nodes["file-editor"] = element({ hidden: true, value: "" });
+  nodes["file-preview-truncated"] = element();
   nodes["file-download"] = element({ href: "https://example.test/file/download" });
   nodes["file-render-status"] = element();
   if (markdown) {
@@ -27,10 +32,14 @@ function setup({ markdown = false, filename = "app.py", renderer = true, clipboa
     nodes["file-plain-tab"] = element();
   }
   const highlighted = [], copied = [], fetched = [], sanitized = [], scripts = [];
-  const rawDownload = "# Full raw file\r\nwith unseen content\r\n";
+  const rawDownload = download;
+  const events = {};
+  let reloads = 0;
   const textarea = element({ select() {}, remove() { this.removed = true; } });
   const window = {
     mermaid,
+    addEventListener(name, callback) { events[name] = callback; },
+    location: { reload() { reloads += 1; } },
     hljs: highlighter ? {
       getLanguage: (language) => ["python", "javascript", "yaml", "ini"].includes(language),
       highlight: (text, options) => { highlighted.push({ text, ...options }); return { value: "escaped-highlight" }; },
@@ -42,9 +51,17 @@ function setup({ markdown = false, filename = "app.py", renderer = true, clipboa
   };
   vm.runInNewContext(readFileSync("static/js/file-preview.js", "utf8"), {
     window,
+    TextDecoder, TextEncoder,
     ...timers,
     navigator: { clipboard: clipboard ? { writeText: async (text) => copied.push(text) } : undefined },
-    fetch: async (...args) => { fetched.push(args); return { ok: fetchOK, text: async () => rawDownload }; },
+    fetch: async (...args) => {
+      fetched.push(args);
+      if (args[1]?.method === "POST") return saveResponse;
+      return {
+        ok: fetchOK, text: async () => rawDownload,
+        arrayBuffer: async () => typeof rawDownload === "string" ? new TextEncoder().encode(rawDownload) : rawDownload,
+      };
+    },
     document: {
       getElementById: (id) => nodes[id] || null,
       querySelector: () => ({ dataset: { fileName: filename } }),
@@ -54,7 +71,7 @@ function setup({ markdown = false, filename = "app.py", renderer = true, clipboa
       execCommand: () => { if (copyOK) copied.push(textarea.value); return copyOK; },
     },
   });
-  return { nodes, highlighted, copied, fetched, sanitized, textarea, rawDownload, scripts, window };
+  return { nodes, highlighted, copied, fetched, sanitized, textarea, rawDownload, scripts, window, events, get reloads() { return reloads; } };
 }
 
 function diagramCode(textContent) {
@@ -237,3 +254,141 @@ for (const options of [{ fetchOK: false }, { clipboard: false, copyOK: false }])
     assert.equal(nodes["file-copy-raw"].disabled, false);
   });
 }
+
+test("Edit reads the complete file and Cancel restores the selected Markdown view without saving", async () => {
+  const { nodes, fetched, rawDownload } = setup({ markdown: true });
+  assert.equal(nodes["file-edit"].disabled, false);
+  await nodes["file-edit"].events.click();
+  assert.equal(nodes["file-editor"].value, rawDownload.replace(/\r\n/g, "\n"));
+  assert.equal(nodes["file-editor"].hidden, false);
+  assert.equal(nodes["file-editor"].focused, true);
+  assert.equal(nodes["file-preview-rendered"].hidden, true);
+  assert.equal(nodes["file-preview-plain"].hidden, true);
+  assert.equal(nodes["file-preview-tab"].disabled, true);
+  assert.equal(nodes["file-copy-raw"].disabled, true);
+  assert.equal(nodes["file-preview-truncated"].hidden, true);
+  nodes["file-editor"].value = "Discard this change";
+  nodes["file-cancel-edit"].events.click();
+  assert.equal(fetched.length, 1);
+  assert.equal(nodes["file-editor"].hidden, true);
+  assert.equal(nodes["file-preview-rendered"].hidden, false);
+  assert.equal(nodes["file-preview-plain"].hidden, true);
+  assert.equal(nodes["file-preview-tab"].disabled, false);
+  assert.equal(nodes["file-copy-raw"].disabled, false);
+  assert.equal(nodes["file-save"].hidden, true);
+});
+
+for (const newline of ["\r\n", "\n", "\r"]) {
+  test(`Save preserves UTF-8 BOM and ${JSON.stringify(newline)} line endings before reloading`, async () => {
+    const app = setup({ download: `\uFEFFfirst${newline}last${newline}` });
+    const { nodes, fetched } = app;
+    await nodes["file-edit"].events.click();
+    assert.equal(nodes["file-editor"].value, "first\nlast\n");
+    nodes["file-editor"].value = "first\n修改內容\nlast\n";
+    await nodes["file-save"].events.click();
+    const [url, request] = fetched[1];
+    assert.equal(url, nodes["file-save"].dataset.saveUrl);
+    assert.equal(request.method, "POST");
+    assert.equal(request.credentials, "same-origin");
+    assert.equal(Buffer.from(request.body).toString("utf8"), `\uFEFFfirst${newline}修改內容${newline}last${newline}`);
+    assert.equal(app.reloads, 1);
+    assert.equal(nodes["file-preview-status"].textContent, "File saved.");
+  });
+}
+
+test("saving an edit retains content beyond the 1 MiB preview limit", async () => {
+  const content = "a".repeat(1024 * 1024) + "\nunseen tail\n";
+  const { nodes, fetched } = setup({ download: content });
+  await nodes["file-edit"].events.click();
+  nodes["file-editor"].value = "updated\n" + nodes["file-editor"].value;
+  await nodes["file-save"].events.click();
+  assert.equal(Buffer.from(fetched[1][1].body).toString("utf8"), "updated\n" + content);
+});
+
+test("Save without edits leaves the original bytes untouched, and empty content can be saved", async () => {
+  const app = setup({ download: "original\r\nmixed\n" });
+  await app.nodes["file-edit"].events.click();
+  await app.nodes["file-save"].events.click();
+  assert.equal(app.fetched.length, 1);
+  assert.equal(app.reloads, 0);
+  assert.equal(app.nodes["file-editor"].hidden, true);
+  await app.nodes["file-edit"].events.click();
+  app.nodes["file-editor"].value = "";
+  await app.nodes["file-save"].events.click();
+  assert.equal(app.fetched[2][1].body.length, 0);
+  assert.equal(app.reloads, 1);
+});
+
+test("a failed save retains edits and enables retry or cancellation", async () => {
+  const saveResponse = { ok: false, json: async () => ({ error: { message: "Permission denied." } }) };
+  const app = setup({ saveResponse });
+  const { nodes } = app;
+  await nodes["file-edit"].events.click();
+  nodes["file-editor"].value = "keep this edit";
+  await nodes["file-save"].events.click();
+  assert.equal(nodes["file-editor"].hidden, false);
+  assert.equal(nodes["file-editor"].value, "keep this edit");
+  assert.equal(nodes["file-editor"].readOnly, false);
+  assert.equal(nodes["file-save"].disabled, false);
+  assert.equal(nodes["file-cancel-edit"].disabled, false);
+  assert.match(nodes["file-preview-status"].textContent, /Could not save file.*Permission denied/);
+  assert.equal(app.reloads, 0);
+  saveResponse.ok = true;
+  await nodes["file-save"].events.click();
+  assert.equal(app.reloads, 1);
+});
+
+test("saving locks the editor and prevents duplicate writes or cancellation until completion", async () => {
+  let finish;
+  const saveResponse = new Promise((resolve) => { finish = resolve; });
+  const app = setup({ saveResponse });
+  const { nodes, fetched } = app;
+  await nodes["file-edit"].events.click();
+  nodes["file-editor"].value = "changed";
+  const pending = nodes["file-save"].events.click();
+  assert.equal(nodes["file-editor"].readOnly, true);
+  assert.equal(nodes["file-save"].disabled, true);
+  assert.equal(nodes["file-cancel-edit"].disabled, true);
+  await nodes["file-save"].events.click();
+  nodes["file-cancel-edit"].events.click();
+  assert.equal(fetched.length, 2);
+  assert.equal(nodes["file-editor"].hidden, false);
+  finish({ ok: true });
+  await pending;
+  assert.equal(app.reloads, 1);
+});
+
+for (const options of [{ fetchOK: false }, { download: new Uint8Array([0xff]) }, { download: "text\u0000binary" }]) {
+  test(`unreadable files cannot enter edit mode: ${JSON.stringify(options)}`, async () => {
+    const { nodes, fetched } = setup(options);
+    await nodes["file-edit"].events.click();
+    assert.equal(nodes["file-editor"].hidden, true);
+    assert.equal(nodes["file-preview-plain"].hidden, false);
+    assert.equal(nodes["file-edit"].disabled, false);
+    assert.equal(nodes["file-copy-raw"].disabled, false);
+    assert.equal(fetched.length, 1);
+    assert.match(nodes["file-preview-status"].textContent, /Could not open file for editing/);
+  });
+}
+
+test("leaving with unsaved edits prompts until cancellation or successful saving", async () => {
+  const { nodes, events } = setup();
+  let prompts = 0;
+  const event = { preventDefault() { prompts += 1; } };
+  events.beforeunload(event);
+  await nodes["file-edit"].events.click();
+  events.beforeunload(event);
+  assert.equal(prompts, 0);
+  nodes["file-editor"].value = "changed";
+  events.beforeunload(event);
+  assert.equal(prompts, 1);
+  assert.equal(event.returnValue, "");
+  nodes["file-cancel-edit"].events.click();
+  events.beforeunload(event);
+  assert.equal(prompts, 1);
+  await nodes["file-edit"].events.click();
+  nodes["file-editor"].value = "saved";
+  await nodes["file-save"].events.click();
+  events.beforeunload(event);
+  assert.equal(prompts, 1);
+});

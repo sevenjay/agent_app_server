@@ -716,6 +716,9 @@ def create_app(
                 "preview_url": preview_url,
                 "diff_url": lambda target: base + "/diff?" + urlencode({"path": target}),
                 "download_url": base + "/download?" + urlencode({"path": path}),
+                "save_url": base + "/upload?" + urlencode({
+                    "path": "/".join(parts[:-1]), "name": preview["entry"]["name"], "overwrite": "true",
+                }),
                 "content_url": base + "/preview/content?" + urlencode({"path": path}),
             },
             headers={

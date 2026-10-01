@@ -3,7 +3,9 @@ import os
 import re
 import subprocess
 import zipfile
+from html import unescape
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
@@ -298,12 +300,16 @@ async def test_preview_text_folders_media_and_binary_files(tmp_path: Path) -> No
     assert "你好" in text.text and "Parent folder" not in text.text
     assert 'aria-label="File path"' in text.text
     assert 'aria-label="Copy raw"' in text.text
+    assert text.text.index('id="file-edit"') < text.text.index('id="file-copy-raw"')
+    assert 'id="file-editor"' in text.text
     assert "default-src 'none'" in text.headers["content-security-policy"]
     assert text.headers["cache-control"] == "no-store"
     assert "example #1.html" in folder.text and ".hidden" not in folder.text
     assert "%231.html" in folder.text and "Download ZIP" in folder.text
     assert ".hidden" in hidden.text and "show_hidden=true" in hidden.text
     assert "Preview is not available" in binary.text
+    for page in (folder, binary, image):
+        assert 'id="file-edit"' not in page.text
     assert "Showing the first 1 MiB" in large.text
     assert len(large.content) < MAX_PREVIEW_BYTES + 8192
     assert '<img src="' in image.text
@@ -313,6 +319,31 @@ async def test_preview_text_folders_media_and_binary_files(tmp_path: Path) -> No
     assert "sandbox" in content.headers["content-security-policy"]
     assert html_content.status_code == 400
     assert missing.status_code == 404 and unknown.status_code == 404
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("filename", ["example #1.py", " example #1.py "])
+async def test_preview_save_url_overwrites_the_selected_file_and_preserves_permissions(tmp_path: Path, filename: str) -> None:
+    folder = tmp_path / "docs & 資料"
+    folder.mkdir()
+    target = folder / filename
+    target.write_bytes(b"print('before')\r\n")
+    target.chmod(0o755)
+    base = "/api/projects/files_project/files"
+    content = "\ufeffprint('修改')\r\n".encode("utf-8")
+    async with application_client(file_application(tmp_path)) as client:
+        page = await client.get(base + "/preview", params={"path": f"docs & 資料/{filename}"})
+        save_url = unescape(re.search(r'data-save-url="([^"]+)"', page.text).group(1))
+        assert parse_qs(urlsplit(save_url).query) == {
+            "path": ["docs & 資料"], "name": [filename], "overwrite": ["true"],
+        }
+        saved = await client.post(save_url, content=content, headers={"Content-Type": "application/octet-stream"})
+        refreshed = await client.get(base + "/preview", params={"path": f"docs & 資料/{filename}"})
+    assert saved.status_code == 201
+    assert target.read_bytes() == content
+    assert target.stat().st_mode & 0o777 == 0o755
+    assert "修改" in refreshed.text and "before" not in refreshed.text
+    assert sorted(path.name for path in folder.iterdir()) == [target.name]
 
 
 @pytest.mark.asyncio
