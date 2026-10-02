@@ -162,6 +162,7 @@ class FakeCodex:
         self.goal_requests: list[tuple[str, str, int | None]] = []
         self.thread_resume_requests: list[tuple[str, dict[str, Any]]] = []
         self.thread_delete_requests: list[str] = []
+        self.skills_reload_requests: list[dict[str, Any]] = []
         self.rate_limit_requests = 0
         self.rate_limits_response: dict[str, Any] = {
             "rate_limits": {
@@ -300,6 +301,9 @@ class FakeCodex:
         return deepcopy(self.rate_limits_response)
 
     async def request(self, method, params, *, response_model):
+        if method == "skills/list":
+            self.skills_reload_requests.append(deepcopy(params))
+            return response_model.model_validate({"data": [{"cwd": cwd, "skills": [], "errors": []} for cwd in params["cwds"]]})
         if method != "account/rateLimitResetCredit/consume":
             raise AssertionError(f"Unexpected fake RPC: {method}")
         self.reset_credit_requests.append(deepcopy(params))

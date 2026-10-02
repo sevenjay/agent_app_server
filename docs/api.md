@@ -23,6 +23,41 @@ Web UI 稱一段對話為 Session；API 與 Codex SDK 使用 Thread／`thread`�
 
 Projects 列在滑鼠 hover 或鍵盤 focus 時顯示三點選單，提供 Rename／Delete；觸控裝置持續顯示。更名與刪除僅支援設定 root 下的直接專案目錄，需要 Codex runtime 可用；專案有活動中的 Turn／Goal 時回 `409`。更名保留既有 Sessions（包括封存狀態），且不覆寫既有目錄。刪除前會顯示專案路徑並要求確認；刪除範圍包含專案內的 Journal 與附件，Codex 在專案外保存的 Thread 記錄不會一併刪除。
 
+## Project skills
+
+所有 Skills API 都需要目前 Web identity，並透過其 Project Registry 解析 `project_key`。管理位置固定為 `<project-root>/.agents/skills/<directory>/`；資料直接來自磁碟，與 Files 共用同一份內容。列出空清單不建立目錄。
+
+| Method | Path（前綴 `/api/projects/{project_key}/skills`） | 用途 |
+| --- | --- | --- |
+| `GET` | `/` | 清單、驗證結果與大小／數量限制 |
+| `POST` | `/` | 建立標準範本；JSON `name`、`description` |
+| `POST` | `/refresh` | 重讀清單並要求 Codex 重新掃描 |
+| `POST` | `/imports?kind=zip` | raw ZIP；只暫存並回傳匯入摘要與 token |
+| `POST` | `/imports?kind=directory` | JSON `files: [{path, content}]`；content 為 base64，path 保留所選目錄的相對路徑 |
+| `POST` | `/imports/{token}` | 確認匯入；JSON `replace` 預設 false |
+| `DELETE` | `/imports/{token}` | 取消暫存匯入 |
+| `GET` | `/{directory}` | 詳細驗證結果、資源清單與整個目錄的 revision |
+| `PATCH` | `/{directory}` | JSON `name`、`revision`；同步變更目錄與 frontmatter name |
+| `DELETE` | `/{directory}?revision=` | 刪除整個 skill |
+| `GET` | `/{directory}/file?path=` | UTF-8 文字內容與檔案內容 revision |
+| `PUT` | `/{directory}/file` | JSON `path`、`content`、`revision`；儲存文字檔 |
+| `POST` | `/{directory}/upload?path=&revision=` | raw bytes 上傳附屬檔案；支援二進位資源 |
+| `DELETE` | `/{directory}/file?path=&revision=` | 刪除附屬檔案或目錄；revision 為整個 skill 的版本 |
+
+清單與詳細資料的 `valid` 表示符合 Agent Skills 格式；`errors` 與 `warnings` 分別是錯誤與建議。錯誤的既有 skill 仍可修正或刪除。symlink、特殊檔案或超出限制的目錄顯示為 `supported=false`，不提供修改操作。超過建議的 500 行只產生 warning。YAML 使用安全解析，拒絕重複 key、alias 與過深結構；其他擴充欄位和原文保留。
+
+匯入只接受一個 skill：ZIP 的根層有 `SKILL.md`，或包在一層 skill 目錄內。資料夾名稱須與 frontmatter name 相符。忽略已驗證路徑上的 `.DS_Store`／`__MACOSX`；拒絕越界、symlink、特殊檔案、重複路徑與加密 ZIP。ZIP 保留一般 executable bit，不保留 setuid 等特殊權限。瀏覽器的目錄上傳無法提供原始 Unix executable bit；需保留時使用 ZIP。
+
+匯入預覽存於專案外的私有暫存目錄，token 綁定 tenant 與 Project root。預設 30 分鐘過期，每位使用者最多四個待匯入項目，服務關閉時清除。確認後先複製到同一 filesystem 的 staging，再搬入正式目錄；同名替換會整包取代，失敗時還原原目錄。預覽之後既有 skill 若變更，commit 回傳 `409 skill_changed`，需重新上傳預覽。
+
+編輯 revision 是內容 SHA-256；新檔使用 `missing`。過期版本回傳 `409 skill_changed`，前端保留草稿。整個 skill 的 revision 包含資源內容及 filesystem metadata，重新命名、刪除與替換都檢查它。Skills 與 Files 的 Web 修改共用 Project lock；外部工具的變更於儲存前重新檢查。
+
+修改 API 回傳 `{skill, reload}`，`reload.status` 為 `reloaded` 或 `unavailable`。Codex 暫時不可用時，已完成的檔案修改仍回傳成功，重新掃描結果另行顯示。掃描使用專案 CWD 與 `skills/list` 的 `forceReload=true`，不回傳其他 scope 的技能內容。已開始的 turn 不會回溯套用編輯內容。
+
+下載整包 ZIP 與非文字預覽沿用 Files API。`skills_max_bytes` 預設 25 MiB，`skills_max_files` 預設 1000 個檔案／目錄；文字編輯上限 1 MiB。可在 `settings.toml` 調整整包限制及 `skills_import_ttl_seconds`。
+
+格式依據：[Agent Skills specification](https://agentskills.io/specification)；目錄與安裝方式參考 [Vercel Skills](https://github.com/vercel-labs/skills)。
+
 ## Project files
 
 所有 path 都相對於指定 Project root；空字串代表 root。

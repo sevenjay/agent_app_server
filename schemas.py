@@ -61,6 +61,26 @@ class ProjectFileRename(StrictRequest):
     name: ProjectFileName
 
 
+class SkillCreate(StrictRequest):
+    name: Annotated[str, Field(min_length=1, max_length=64)]
+    description: Annotated[str, Field(min_length=1, max_length=1024)]
+
+
+class SkillRename(StrictRequest):
+    name: Annotated[str, Field(min_length=1, max_length=64)]
+    revision: Annotated[str, Field(min_length=1, max_length=64)]
+
+
+class SkillFileSave(StrictRequest):
+    path: Annotated[str, Field(min_length=1, max_length=4096)]
+    content: Annotated[str, Field(max_length=1024 * 1024)]
+    revision: Annotated[str, Field(min_length=1, max_length=64)]
+
+
+class SkillImportCommit(StrictRequest):
+    replace: bool = False
+
+
 class ThreadCreate(StrictRequest):
     project_key: ProjectKey
     name: Annotated[str, Field(min_length=1, max_length=200)] | None = None

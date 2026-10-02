@@ -46,6 +46,11 @@ codex_projects_root = "/codex"
 # Project keys or directory names excluded from the Web project selector.
 codex_hidden_projects = ["data"]
 
+# Per-skill upload/unpacked size, file/directory count, and private import expiry.
+skills_max_bytes = 26214400
+skills_max_files = 1000
+skills_import_ttl_seconds = 1800
+
 [development]
 web_host = "127.0.0.1"
 web_port = 8080

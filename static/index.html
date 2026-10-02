@@ -25,6 +25,7 @@
     <script defer src="https://unpkg.com/mermaid@11.12.0/dist/mermaid.min.js"
       integrity="sha384-o+g/BxPwhi0C3RK7oQBxQuNimeafQ3GE/ST4iT2BxVI4Wzt60SH4pq9iXVYujjaS"
       crossorigin="anonymous"></script>
+    <script defer src="/static/js/project-skills.js"></script>
     <script defer src="/static/js/codex-console.js"></script>
     <script defer src="/static/js/timeline-markdown.js"></script>
     <script defer src="https://unpkg.com/alpinejs@3.16.3/dist/cdn.min.js"
@@ -37,6 +38,7 @@
     x-data="codexConsole()"
     @htmx:response:error.window="handleHtmxError($event)"
     @htmx:error.window="handleHtmxError($event)"
+    @beforeunload.window="guardSkillUnload($event)"
   >
     <div class="app-shell">
       <div
@@ -146,9 +148,9 @@
                 aria-controls="timeline"
                 :aria-selected="conversationTab === 'timeline'"
                 :tabindex="conversationTab === 'timeline' ? 0 : -1"
-                @click="conversationTab = 'timeline'"
-                @keydown.left.prevent="openFilesTab(); $nextTick(() => $refs.filesTab.focus())"
-                @keydown.right.prevent="conversationTab = 'debug'; $nextTick(() => $refs.debugTab.focus())"
+                @click="switchConversationTab('timeline')"
+                @keydown.left.prevent="openSkillsTab(); $nextTick(() => $refs.skillsTab.focus())"
+                @keydown.right.prevent="switchConversationTab('debug'); $nextTick(() => $refs.debugTab.focus())"
               >
                 Timeline
               </button>
@@ -162,9 +164,9 @@
                 aria-controls="live-debug"
                 :aria-selected="conversationTab === 'debug'"
                 :tabindex="conversationTab === 'debug' ? 0 : -1"
-                @click="conversationTab = 'debug'"
-                @keydown.left.prevent="conversationTab = 'timeline'; $nextTick(() => $refs.timelineTab.focus())"
-                @keydown.right.prevent="conversationTab = 'changes'; $nextTick(() => $refs.changesTab.focus())"
+                @click="switchConversationTab('debug')"
+                @keydown.left.prevent="switchConversationTab('timeline'); $nextTick(() => $refs.timelineTab.focus())"
+                @keydown.right.prevent="switchConversationTab('changes'); $nextTick(() => $refs.changesTab.focus())"
               >
                 <span>Live debug</span>
                 <span
@@ -184,8 +186,8 @@
                 aria-controls="latest-changes"
                 :aria-selected="conversationTab === 'changes'"
                 :tabindex="conversationTab === 'changes' ? 0 : -1"
-                @click="conversationTab = 'changes'"
-                @keydown.left.prevent="conversationTab = 'debug'; $nextTick(() => $refs.debugTab.focus())"
+                @click="switchConversationTab('changes')"
+                @keydown.left.prevent="switchConversationTab('debug'); $nextTick(() => $refs.debugTab.focus())"
                 @keydown.right.prevent="openFilesTab(); $nextTick(() => $refs.filesTab.focus())"
               >
                 Live changes
@@ -201,11 +203,21 @@
                 :aria-selected="conversationTab === 'files'"
                 :tabindex="conversationTab === 'files' ? 0 : -1"
                 @click="openFilesTab()"
-                @keydown.left.prevent="conversationTab = 'changes'; $nextTick(() => $refs.changesTab.focus())"
-                @keydown.right.prevent="conversationTab = 'timeline'; $nextTick(() => $refs.timelineTab.focus())"
+                @keydown.left.prevent="switchConversationTab('changes'); $nextTick(() => $refs.changesTab.focus())"
+                @keydown.right.prevent="openSkillsTab(); $nextTick(() => $refs.skillsTab.focus())"
               >
                 Files
               </button>
+              <button
+                id="conversation-tab-skills" x-ref="skillsTab" class="conversation-tab"
+                x-effect="if (conversationTab === 'skills' && mobileTab === 'chat') $nextTick(() => $el.scrollIntoView({ block: 'nearest', inline: 'nearest' }))"
+                :class="{ 'conversation-tab-active': conversationTab === 'skills' }"
+                type="button" role="tab" aria-controls="project-skills"
+                :aria-selected="conversationTab === 'skills'" :tabindex="conversationTab === 'skills' ? 0 : -1"
+                @click="openSkillsTab()"
+                @keydown.left.prevent="openFilesTab(); $nextTick(() => $refs.filesTab.focus())"
+                @keydown.right.prevent="switchConversationTab('timeline'); $nextTick(() => $refs.timelineTab.focus())"
+              >skills</button>
             </div>
             <button
               x-cloak
@@ -639,6 +651,109 @@
               </template>
             </div>
           </div>
+
+          <section
+            id="project-skills" x-cloak x-show="conversationTab === 'skills'"
+            class="skills-panel pretty-scrollbar min-h-0 min-w-0 flex-1 overflow-y-auto px-3 py-3 sm:px-4"
+            role="tabpanel" aria-labelledby="conversation-tab-skills" tabindex="0"
+            @resize.window="if (conversationTab === 'skills') $nextTick(() => $refs.skillsTab.scrollIntoView({ block: 'nearest', inline: 'nearest' }))"
+          >
+            <header class="files-heading">
+              <div class="min-w-0"><p class="section-kicker">Project workspace</p><h2 class="files-title">skills</h2></div>
+              <div class="files-toolbar" x-show="projectKey">
+                <input x-ref="skillDirectoryInput" class="sr-only" type="file" webkitdirectory multiple @change="uploadSkill($event, 'directory')">
+                <input x-ref="skillZipInput" class="sr-only" type="file" accept=".zip,application/zip" @change="uploadSkill($event, 'zip')">
+                <button type="button" class="button-secondary" :disabled="skillActionsDisabled" @click="$refs.skillDirectoryInput.click()">Upload folder</button>
+                <button type="button" class="button-secondary" :disabled="skillActionsDisabled" @click="$refs.skillZipInput.click()">Upload ZIP</button>
+                <button type="button" class="button-secondary" :disabled="skillActionsDisabled" @click="if (confirmSkillNavigation()) skillNewOpen = !skillNewOpen">New skill</button>
+                <button type="button" class="button-secondary" :disabled="skillActionsDisabled" @click="refreshSkills()">Refresh</button>
+              </div>
+            </header>
+            <p x-show="!projectKey" class="files-empty-state">Choose a project to manage its skills.</p>
+            <template x-if="projectKey">
+              <div class="skills-content">
+                <button type="button" class="skills-location" :title="skillLocation" @click="copyText(skillLocation).catch(error => skillError = error.message)"><code x-text="skillLocation"></code><span>Copy path</span></button>
+                <p class="skills-limit" x-text="`Upload one complete skill folder or ZIP · up to ${formatFileSize(skillLimits.max_bytes)} and ${skillLimits.max_files} files/directories`"></p>
+                <div x-show="skillError" class="files-error skills-error" role="alert"><span x-text="skillError"></span><button type="button" aria-label="Dismiss skill error" @click="skillError = ''">×</button></div>
+                <p class="files-operation-status" aria-live="polite" x-text="skillStatus"></p>
+                <p x-show="skillReloadStatus" class="skills-limit" role="status" x-text="skillReloadStatus"></p>
+
+                <form x-show="skillNewOpen" class="skill-form" @submit.prevent="createSkill()">
+                  <h3>New skill</h3>
+                  <label>Name<input type="text" x-model="skillNewName" maxlength="64" pattern="[a-z0-9]+(-[a-z0-9]+)*" placeholder="code-review" required :disabled="skillBusy"></label>
+                  <label>Description<textarea x-model="skillNewDescription" maxlength="1024" rows="3" placeholder="What this skill does and when the agent should use it" required :disabled="skillBusy"></textarea></label>
+                  <div class="skills-actions"><button type="submit" class="button-primary" :disabled="skillActionsDisabled">Create skill</button><button type="button" class="button-secondary" :disabled="skillBusy" @click="skillNewOpen = false">Cancel</button></div>
+                </form>
+
+                <template x-if="skillImport">
+                  <section class="skill-import" aria-label="Skill import preview">
+                    <h3>Import preview</h3>
+                    <strong x-text="skillImport.directory"></strong><p x-text="skillImport.description"></p>
+                    <code x-text="skillImport.path"></code>
+                    <p class="skills-limit" x-text="`${skillImport.file_count} files · ${formatFileSize(skillImport.size)}`"></p>
+                    <ul class="skill-validation"><template x-for="error in skillImport.errors" :key="error"><li class="skill-invalid" x-text="error"></li></template><template x-for="warning in skillImport.warnings" :key="warning"><li class="skill-warning" x-text="warning"></li></template></ul>
+                    <details><summary>Included files</summary><ul class="skill-import-files"><template x-for="file in skillImport.files" :key="file.path"><li><code x-text="file.path"></code><span x-text="file.type === 'file' ? formatFileSize(file.size) : 'Folder'"></span></li></template></ul></details>
+                    <label x-show="skillImport.exists" class="skill-replace"><input type="checkbox" x-model="skillReplace" :disabled="skillBusy"><span>Replace the entire existing skill, including removing files absent from this upload.</span></label>
+                    <div class="skills-actions"><button type="button" class="button-primary" :disabled="skillActionsDisabled || !skillImport.valid || (skillImport.exists && !skillReplace)" @click="commitSkillImport()">Import skill</button><button type="button" class="button-secondary" :disabled="skillBusy" @click="cancelSkillImport()">Cancel</button></div>
+                  </section>
+                </template>
+
+                <div class="skills-layout" :class="{ 'skills-detail-open': skillDetail }">
+                  <aside class="skills-list" aria-label="Project skills">
+                    <label class="sr-only" for="skill-search">Search skill names and descriptions</label><input id="skill-search" class="skills-search" type="search" x-model="skillSearch" placeholder="Search names or descriptions">
+                    <p x-show="skillLoading" class="files-tree-message" role="status">Loading skills…</p>
+                    <p x-show="!skillLoading && !skills.length" class="files-empty-state">No project skills yet. Upload a skill folder or ZIP, or create a new skill.</p>
+                    <p x-show="skills.length && !filteredSkills.length" class="files-tree-message">No matching skills.</p>
+                    <template x-for="skill in filteredSkills" :key="skill.directory">
+                      <button type="button" class="skill-list-item" :class="{ 'skill-list-item-active': skillDetail?.directory === skill.directory }" :disabled="skillBusy" @click="selectSkill(skill)">
+                        <strong x-text="skill.directory"></strong><span class="skill-description" x-text="skill.description || 'No description'"></span>
+                        <span :class="skill.valid ? 'skill-valid' : 'skill-invalid'" x-text="skill.valid ? '✓ Format valid' : '⚠ Needs repair'"></span>
+                      </button>
+                    </template>
+                  </aside>
+                  <section class="skill-detail" aria-label="Skill details">
+                    <p x-show="!skillDetail" class="files-empty-state">Select a skill to preview or edit it.</p>
+                    <template x-if="skillDetail">
+                      <div>
+                        <button type="button" class="button-secondary skills-back" :disabled="skillBusy" @click="if (confirmSkillNavigation()) { skillDetail = null; skillFileLoaded = false; skillFileRequestId += 1 }">← Skills</button>
+                        <header class="skill-detail-heading"><h3 x-text="skillDetail.directory"></h3><span :class="skillDetail.valid ? 'skill-valid' : 'skill-invalid'" x-text="skillDetail.valid ? '✓ Format valid' : '⚠ Needs repair'"></span></header>
+                        <p class="skill-description" x-text="skillDetail.description"></p><code class="skill-path" x-text="skillDetail.path"></code>
+                        <p class="skills-limit" x-show="skillDetail.supported" x-text="`${skillDetail.file_count} files · ${formatFileSize(skillDetail.size)}`"></p>
+                        <ul class="skill-validation"><template x-for="error in skillDetail.errors" :key="error"><li class="skill-invalid" x-text="error"></li></template><template x-for="warning in skillDetail.warnings" :key="warning"><li class="skill-warning" x-text="warning"></li></template></ul>
+                        <div class="skills-actions" x-show="skillDetail.supported"><button type="button" class="button-secondary" :disabled="skillActionsDisabled" @click="downloadSkill()">Download ZIP</button><button type="button" class="button-secondary" :disabled="skillActionsDisabled" @click="renameSkill()">Rename</button><button type="button" class="button-secondary skill-delete" :disabled="skillActionsDisabled" @click="deleteSkill()">Delete skill</button></div>
+                        <div x-show="skillDetail.supported">
+                          <div class="skill-view-tabs" aria-label="Skill content views">
+                            <button type="button" :class="{ 'skill-view-active': skillView === 'preview' }" :disabled="!skillFileLoaded" @click="skillView = 'preview'">Preview</button>
+                            <button type="button" :class="{ 'skill-view-active': skillView === 'edit' }" :disabled="!skillFileLoaded" @click="skillView = 'edit'">Edit</button>
+                            <button type="button" :class="{ 'skill-view-active': skillView === 'files' }" @click="skillView = 'files'">Files</button>
+                            <span x-show="skillDirty" class="skill-warning">Unsaved</span>
+                          </div>
+                          <div x-show="skillView !== 'files' && skillFileLoaded">
+                            <div class="skill-editor-heading"><code x-text="skillFilePath"></code><button type="button" class="button-secondary" :disabled="skillActionsDisabled" @click="openSkillFile(skillFilePath, skillView)">Reload file</button></div>
+                            <div x-show="skillView === 'preview'">
+                              <div x-show="/\.(md|markdown)$/i.test(skillFilePath)" class="markdown-body skill-markdown" x-html="skillPreview"></div>
+                              <pre x-show="!/\.(md|markdown)$/i.test(skillFilePath)" class="skill-source" x-text="skillDraft"></pre>
+                            </div>
+                            <div x-show="skillView === 'edit'">
+                              <label class="sr-only" for="skill-editor">Skill file content</label><textarea id="skill-editor" class="skill-editor" x-model="skillDraft" spellcheck="false" :disabled="skillActionsDisabled" @keydown.ctrl.s.prevent="saveSkillFile()" @keydown.meta.s.prevent="saveSkillFile()"></textarea>
+                              <div class="skills-actions"><button type="button" class="button-primary" :disabled="skillActionsDisabled || !skillDirty" @click="saveSkillFile()">Save</button><button type="button" class="button-secondary" :disabled="skillActionsDisabled" @click="cancelSkillEdit()">Cancel</button></div>
+                            </div>
+                          </div>
+                          <div x-show="skillView === 'files'">
+                            <div class="skills-actions"><button type="button" class="button-secondary" :disabled="skillActionsDisabled" @click="newSkillFile()">New file</button><button type="button" class="button-secondary" :disabled="skillActionsDisabled" @click="$refs.skillFileUpload.click()">Upload file</button><input type="file" x-ref="skillFileUpload" class="sr-only" @change="uploadSkillFile($event)"></div>
+                            <ul class="skill-file-tree" aria-label="Skill files"><template x-for="file in skillDetail.files || []" :key="file.path"><li>
+                              <span class="skill-file-name"><span aria-hidden="true" x-text="file.type === 'directory' ? '▸' : '·'"></span><code x-text="file.path"></code></span>
+                              <span class="skill-file-actions"><button type="button" x-show="file.type === 'file'" :disabled="skillActionsDisabled" @click="openSkillFile(file.path)">Edit</button><a :href="skillFileUrl(file)" target="_blank" rel="noopener noreferrer">Preview</a><a :href="skillFileUrl(file, 'download')">Download</a><button type="button" x-show="file.path !== 'SKILL.md'" :disabled="skillActionsDisabled" @click="deleteSkillFile(file)">Delete</button></span>
+                            </li></template></ul>
+                          </div>
+                        </div>
+                      </div>
+                    </template>
+                  </section>
+                </div>
+              </div>
+            </template>
+          </section>
 
           <div
             id="composer"

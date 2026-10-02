@@ -30,7 +30,7 @@ window.codexConsole = function codexConsole() {
   let threadRefreshPromise = null;
   let threadRefreshQueued = false;
 
-  return {
+  const state = {
     projects: [],
     projectKey: "",
     projectActionsKey: "",
@@ -626,6 +626,7 @@ window.codexConsole = function codexConsole() {
     async selectProject(projectKey) {
       if (this.composerSubmitting || this.projectOperationBusy) return;
       if (this.projectKey === projectKey) return;
+      if (this.confirmSkillNavigation && !this.confirmSkillNavigation()) return;
       if (this.fileOperationBusy) {
         this.showFileError(new Error("Wait for the current file operation to finish."));
         return;
@@ -634,6 +635,7 @@ window.codexConsole = function codexConsole() {
       this.projectActionsKey = "";
       this.projectKey = projectKey;
       this.resetProjectFiles(projectKey);
+      this.resetProjectSkills?.(projectKey);
       this.threadId = "";
       this.mobileTab = "sessions";
       this.closeEvents();
@@ -740,14 +742,22 @@ window.codexConsole = function codexConsole() {
       menu.style.setProperty("--file-menu-top", `${top}px`);
     },
 
+    switchConversationTab(tab) {
+      if (this.confirmSkillNavigation && !this.confirmSkillNavigation()) return false;
+      this.conversationTab = tab;
+      return true;
+    },
+
     async openFilesTab() {
+      if (this.confirmSkillNavigation && !this.confirmSkillNavigation()) return;
       this.conversationTab = "files";
       if (!this.projectKey) {
         this.fileError = "Choose a project first.";
         return;
       }
       try {
-        await this.ensureProjectFiles();
+        if (this.filesProjectKey !== this.projectKey) this.resetProjectFiles(this.projectKey);
+        await this.refreshProjectFiles();
       } catch (error) {
         this.showFileError(error);
       }
@@ -1261,6 +1271,7 @@ window.codexConsole = function codexConsole() {
     async selectThread(threadId) {
       this.modelSettingsOpen = false;
       if (this.composerSubmitting) return;
+      if (this.confirmSkillNavigation && !this.confirmSkillNavigation()) return;
       if (this.threadId !== threadId) this.clearAttachmentDraft();
       this.attachmentSubmissionUncertain = false;
       this.sessionActionsThreadId = "";
@@ -1386,7 +1397,8 @@ window.codexConsole = function codexConsole() {
     },
 
     async renameProject(projectKey) {
-      if (this.projectOperationBusy || this.composerSubmitting || this.fileOperationBusy) return;
+      if (this.projectOperationBusy || this.composerSubmitting || this.fileOperationBusy || this.skillBusy) return;
+      if (projectKey === this.projectKey && this.confirmSkillNavigation && !this.confirmSkillNavigation()) return;
       const project = this.projects.find((item) => item.key === projectKey);
       if (!project) return;
       const name = window.prompt("New project directory name", project.name)?.trim();
@@ -1401,9 +1413,11 @@ window.codexConsole = function codexConsole() {
         if (this.projectKey === projectKey) {
           this.projectKey = renamed.key;
           this.resetProjectFiles(renamed.key);
+          this.resetProjectSkills?.(renamed.key);
           await this.refreshThreads();
           if (this.threadId) await this.refreshThread();
           if (this.conversationTab === "files") await this.ensureProjectFiles();
+          if (this.conversationTab === "skills") await this.refreshSkills({ reload: false });
         }
         await this.refreshProjects();
       } catch (error) {
@@ -1414,7 +1428,8 @@ window.codexConsole = function codexConsole() {
     },
 
     async deleteProject(projectKey) {
-      if (this.projectOperationBusy || this.composerSubmitting || this.fileOperationBusy) return;
+      if (this.projectOperationBusy || this.composerSubmitting || this.fileOperationBusy || this.skillBusy) return;
+      if (projectKey === this.projectKey && this.confirmSkillNavigation && !this.confirmSkillNavigation()) return;
       const project = this.projects.find((item) => item.key === projectKey);
       if (!project || !window.confirm(
         `Delete project "${project.name}" and all files in:\n${project.path}\n\nThis cannot be undone.`,
@@ -1430,6 +1445,7 @@ window.codexConsole = function codexConsole() {
           this.closeEvents();
           this.clearThreadPanels();
           this.resetProjectFiles();
+          this.resetProjectSkills?.();
           const list = document.getElementById("thread-list");
           if (list) {
             const empty = document.createElement("p");
@@ -1448,6 +1464,7 @@ window.codexConsole = function codexConsole() {
 
     async newProject() {
       if (this.projectOperationBusy || this.composerSubmitting) return;
+      if (this.confirmSkillNavigation && !this.confirmSkillNavigation()) return;
       if (this.fileOperationBusy) {
         this.showFileError(new Error("Wait for the current file operation to finish."));
         return;
@@ -1475,6 +1492,7 @@ window.codexConsole = function codexConsole() {
 
     async newThread() {
       if (this.composerSubmitting) return;
+      if (this.confirmSkillNavigation && !this.confirmSkillNavigation()) return;
       if (!this.projectKey) {
         this.errorMessage = "Choose a project first.";
         return;
@@ -3368,4 +3386,6 @@ window.codexConsole = function codexConsole() {
       this.errorMessage = error?.message || "The request failed.";
     },
   };
+  if (window.projectSkills) Object.defineProperties(state, Object.getOwnPropertyDescriptors(window.projectSkills()));
+  return state;
 };

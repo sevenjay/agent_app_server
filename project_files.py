@@ -13,8 +13,11 @@ import tempfile
 import zipfile
 from contextlib import nullcontext
 from dataclasses import dataclass, field
+from functools import wraps
 from pathlib import Path
+from threading import Lock, RLock
 from typing import Any
+from weakref import WeakValueDictionary
 
 from projects import Project
 
@@ -23,6 +26,26 @@ MAX_RELATIVE_PATH_BYTES = 4096
 MAX_NAME_BYTES = 255
 MAX_PREVIEW_BYTES = 1024 * 1024
 MAX_DIFF_BYTES = 2 * 1024 * 1024
+
+_PROJECT_LOCKS: WeakValueDictionary = WeakValueDictionary()
+_PROJECT_LOCKS_GUARD = Lock()
+
+
+def _project_lock(root: Path):
+    with _PROJECT_LOCKS_GUARD:
+        lock = _PROJECT_LOCKS.get(root)
+        if lock is None:
+            lock = RLock()
+            _PROJECT_LOCKS[root] = lock
+        return lock
+
+
+def _serialized_mutation(method):
+    @wraps(method)
+    def locked(self, *args, **kwargs):
+        with self.lock:
+            return method(self, *args, **kwargs)
+    return locked
 
 PREVIEW_MEDIA_TYPES = {
     "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "image/bmp", "image/x-icon",
@@ -206,6 +229,7 @@ class ProjectFileManager:
         if not root.is_dir():
             raise ProjectFileNotFoundError
         self.root = root
+        self.lock = _project_lock(root)
 
     def _existing_path(self, relative_path: str, *, allow_root: bool = True, allow_missing: bool = False) -> Path:
         parts = _relative_parts(relative_path, allow_root=allow_root)
@@ -570,6 +594,7 @@ class ProjectFileManager:
             raise ProjectFileTypeError
         return target
 
+    @_serialized_mutation
     def create_directory(self, parent_path: str, name: str) -> dict[str, Any]:
         parent = self._directory(parent_path)
         target = parent / _validate_name(name)
@@ -587,6 +612,7 @@ class ProjectFileManager:
             raise ProjectFileError from exc
         return self._entry(target)
 
+    @_serialized_mutation
     def upload_file(
         self,
         parent_path: str,
@@ -658,6 +684,7 @@ class ProjectFileManager:
                     pass
         return self._entry(target)
 
+    @_serialized_mutation
     def rename(self, relative_path: str, new_name: str) -> dict[str, Any]:
         source = self._existing_path(relative_path, allow_root=False)
         target = source.parent / _validate_name(new_name)
@@ -687,6 +714,7 @@ class ProjectFileManager:
             raise ProjectFileError from exc
         return self._entry(target)
 
+    @_serialized_mutation
     def delete(self, relative_path: str) -> None:
         target = self._existing_path(relative_path, allow_root=False)
         try:

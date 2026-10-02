@@ -13,7 +13,7 @@ from typing import Any
 
 from openai_codex import ApprovalMode, AsyncThread, LocalImageInput, Sandbox, TextInput
 from openai_codex.errors import InvalidParamsError, InvalidRequestError
-from openai_codex.generated.v2_all import ThreadDeleteParams, ThreadDeleteResponse
+from openai_codex.generated.v2_all import ThreadDeleteParams, ThreadDeleteResponse, SkillsListParams, SkillsListResponse
 from starlette.concurrency import run_in_threadpool
 
 from codex_goal_adapter import CodexGoalAdapter
@@ -1296,6 +1296,19 @@ class CodexService:
             else:
                 return None
         return False
+
+    async def reload_project_skills(self, project_key: str) -> dict[str, str]:
+        project = self._project(project_key)
+        client = getattr(self.codex, "_client", None)
+        request = getattr(client, "request", None)
+        if not callable(request):
+            raise ConsoleUnavailable
+        params = SkillsListParams(cwds=[str(project.path)], force_reload=True)
+        await self._call(request(
+            "skills/list", params.model_dump(mode="json", by_alias=True, exclude_none=True),
+            response_model=SkillsListResponse,
+        ), operation="skills_reload")
+        return {"status": "reloaded", "message": "Codex skills rescanned."}
 
     async def _delete_thread_request(self, thread_id: str) -> Any:
         """Bridge SDK releases that have the generated RPC types but no flat method."""

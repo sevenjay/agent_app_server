@@ -15,6 +15,7 @@ flowchart LR
         goals["CodexGoalAdapter<br/>goal protocol、logical stream"]
         registry["ProjectRegistry<br/>探索／建立 Project"]
         files["ProjectFileManager<br/>project-scoped file operations"]
+        skills["ProjectSkillManager / SkillImportStore<br/>validation / staged imports / editing"]
         turns["TurnManager<br/>per-thread active state"]
         journal["StreamJournal<br/>normalize、redact、durable sequence"]
         events["EventHub<br/>live fan-out、short cache"]
@@ -45,6 +46,8 @@ flowchart LR
     web --> metadata
     registry <-->|discover / mkdir / resolve| projects
     web --> files
+    web --> skills
+    skills --> files
     files <-->|list / upload / download<br/>mkdir / rename / delete| projects
     codex <-->|read / write workspace| projects
     journal -->|.stream_journal JSONL| projects
@@ -60,6 +63,7 @@ flowchart LR
 - Browser 只提交 server 產生的 `project_key`，不能提交任意 CWD。建立 Project 時只能提交一個目錄名稱。
 - `ProjectRegistry` 只接受目前 workspace scope root 的第一層實體目錄；單用戶 scope 是 `codex_projects_root`，多租戶 scope 是其中的 username 目錄。Registry 忽略 symlink，名稱不符合安全 key 格式時會產生穩定、opaque 的 key。
 - `ProjectFileManager` 只接受相對於 Project root 的 path，逐層拒絕 symlink、absolute path、path traversal、control characters 與 special file。Files UI 的修改與刪除會直接作用於 workspace。
+- `ProjectSkillManager` 固定管理 `.agents/skills`，與 Files 共用 Project mutation lock。`SkillImportStore` 將待確認內容暫存在專案外，token 同時綁定 tenant 與 Project root；確認、版本檢查與格式驗證成功後才寫入專案。Skills metadata 不存入 SQLite。
 - `CodexService` 在 Thread list、resume 與 read 後持續核對實際 CWD。Thread 不屬於 registry 內 Project 時一律視為 `404`。
 - `require_web_user` 在 `single_user` 建立固定 local identity；在 `multi_tenant` 接受 oauth2-proxy 的 trusted identity headers，選出 tenant workspace、Project Registry 與 Codex service view。backend 必須限制為 proxy 可連，避免 Header spoofing。
 - 多租戶共用單一 `AsyncCodex` client、Linux service account 與 usage limit，但 EventHub、TurnManager、metadata、preferences、Project CWD 與 Stream Journal 都帶 tenant scope。這不是不同 UID/container 等級的強隔離。
@@ -74,6 +78,7 @@ flowchart LR
 | `CodexGoalAdapter` | 將 SDK goal get/set/clear 與多個 physical continuation Turns 包裝成單一 logical operation | ASGI lifespan / Goal operation |
 | `ProjectRegistry` | 探索 root 第一層目錄、建立 Project、key/path 對應 | Process；讀取時 refresh |
 | `ProjectFileManager` | 在單一 Project 內列出、上傳、下載、建立、重新命名與刪除檔案；拒絕 path escape 與 symlink | Request / workspace |
+| `ProjectSkillManager` / `SkillImportStore` | 校驗專案技能、編輯與版本檢查、隔離的暫存預覽、整包匯入與替換 | Request / application lifespan / workspace |
 | `TurnManager` | 原子保留 Turn、維持 active handle/task、排除衝突 mutation、shutdown drain | Process memory |
 | `StreamJournal` | SDK event normalize／redact、per-thread JSONL append、durable sequence、history backfill、Timeline materialization、retention／trash | Project persistent data |
 | `EventHub` | 已持久事件的即時 fan-out、短期 cache、bounded subscriber queue | Process memory |

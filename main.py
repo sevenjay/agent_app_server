@@ -46,6 +46,7 @@ from project_files import (
     ProjectFileManager,
     ProjectNotFoundError,
 )
+from project_skills import ProjectSkillManager, SkillError, SkillImportStore, SkillLimits
 from projects import (
     InvalidProjectNameError,
     ProjectAlreadyExistsError,
@@ -65,6 +66,10 @@ from schemas import (
     ProjectDirectoryCreate,
     ProjectFileRename,
     ProjectKey,
+    SkillCreate,
+    SkillRename,
+    SkillFileSave,
+    SkillImportCommit,
     ThreadCreate,
     ThreadUpdate,
     TurnStart,
@@ -302,6 +307,12 @@ def create_app(
         enabled=codex_enabled,
         **runtime_kwargs,
     )
+    skill_limits = SkillLimits(
+        max_bytes=int(getattr(settings, "skills_max_bytes", 25 * 1024 * 1024)),
+        max_files=int(getattr(settings, "skills_max_files", 1000)),
+        import_ttl_seconds=int(getattr(settings, "skills_import_ttl_seconds", 1800)),
+    )
+    skill_imports = SkillImportStore(skill_limits)
 
     @asynccontextmanager
     async def lifespan(application: FastAPI):
@@ -312,7 +323,10 @@ def create_app(
             yield
         finally:
             LOGD("console_lifespan_shutdown")
-            await application.state.codex_runtime.close()
+            try:
+                await application.state.codex_runtime.close()
+            finally:
+                await asyncio.to_thread(skill_imports.close)
 
     application = FastAPI(
         title=str(getattr(settings, "app_name", "agent_app_server")),
@@ -322,6 +336,7 @@ def create_app(
     application.state.codex_runtime = codex_runtime
     application.state.project_registry = project_registry
     application.state.tenant_workspace_manager = tenant_workspace_manager
+    application.state.skill_imports = skill_imports
 
     selected_environment = environment_settings()
     trusted_hosts = list(getattr(selected_environment, "trusted_hosts", ()))
@@ -577,6 +592,108 @@ def create_app(
         except UnknownProjectError as exc:
             raise ProjectNotFoundError from exc
         return ProjectFileManager(project)
+
+    def project_skill_manager(request: Request, project_key: str) -> ProjectSkillManager:
+        try:
+            project = _web_user(request).registry.get(project_key)
+        except UnknownProjectError as exc:
+            raise ProjectNotFoundError from exc
+        return ProjectSkillManager(project, skill_limits)
+
+    async def skill_body(request: Request, limit: int) -> bytes:
+        chunks = bytearray()
+        async for chunk in request.stream():
+            if len(chunks) + len(chunk) > limit:
+                raise SkillError("The upload exceeds the configured size limit.", status_code=413)
+            chunks.extend(chunk)
+        return bytes(chunks)
+
+    async def skill_result(request: Request, project_key: str, result: dict | None = None) -> dict:
+        try:
+            reload_status = await _service(request).reload_project_skills(project_key)
+        except Exception as exc:
+            LOGD(f"skill_reload_unavailable exception={type(exc).__name__}")
+            reload_status = {"status": "unavailable", "message": "Skill files were updated. Codex could not rescan skills; retry Refresh later."}
+        return {"skill": result, "reload": reload_status}
+
+    @application.get("/api/projects/{project_key}/skills", dependencies=[Depends(require_web_user)])
+    async def api_project_skills(request: Request, project_key: ProjectKey):
+        return await asyncio.to_thread(project_skill_manager(request, project_key).list_skills)
+
+    @application.post("/api/projects/{project_key}/skills", status_code=201, dependencies=[Depends(require_web_user)])
+    async def api_create_skill(request: Request, project_key: ProjectKey, command: SkillCreate):
+        manager = project_skill_manager(request, project_key)
+        result = await asyncio.to_thread(manager.create, command.name, command.description)
+        return await skill_result(request, project_key, result)
+
+    @application.post("/api/projects/{project_key}/skills/refresh", dependencies=[Depends(require_web_user)])
+    async def api_refresh_skills(request: Request, project_key: ProjectKey):
+        manager = project_skill_manager(request, project_key)
+        result = await asyncio.to_thread(manager.list_skills)
+        return {**result, **(await skill_result(request, project_key))}
+
+    @application.post("/api/projects/{project_key}/skills/imports", dependencies=[Depends(require_web_user)])
+    async def api_prepare_skill_import(request: Request, project_key: ProjectKey, kind: str = "zip"):
+        manager = project_skill_manager(request, project_key)
+        raw = await skill_body(request, skill_limits.max_request_bytes)
+        return await asyncio.to_thread(skill_imports.prepare, manager, _web_user(request).tenant_id, raw, kind)
+
+    @application.post("/api/projects/{project_key}/skills/imports/{token}", dependencies=[Depends(require_web_user)])
+    async def api_commit_skill_import(request: Request, project_key: ProjectKey, token: str, command: SkillImportCommit):
+        manager = project_skill_manager(request, project_key)
+        result = await asyncio.to_thread(skill_imports.commit, token, manager, _web_user(request).tenant_id, command.replace)
+        return await skill_result(request, project_key, result)
+
+    @application.delete("/api/projects/{project_key}/skills/imports/{token}", status_code=204, dependencies=[Depends(require_web_user)])
+    async def api_discard_skill_import(request: Request, project_key: ProjectKey, token: str):
+        manager = project_skill_manager(request, project_key)
+        await asyncio.to_thread(skill_imports.discard, token, manager, _web_user(request).tenant_id)
+        return Response(status_code=204)
+
+    @application.get("/api/projects/{project_key}/skills/{directory}", dependencies=[Depends(require_web_user)])
+    async def api_skill_detail(request: Request, project_key: ProjectKey, directory: str):
+        return await asyncio.to_thread(project_skill_manager(request, project_key).detail, directory)
+
+    @application.get("/api/projects/{project_key}/skills/{directory}/file", dependencies=[Depends(require_web_user)])
+    async def api_skill_file(request: Request, project_key: ProjectKey, directory: str,
+                             path: Annotated[str, Query(min_length=1, max_length=4096)]):
+        return await asyncio.to_thread(project_skill_manager(request, project_key).read_file, directory, path)
+
+    @application.put("/api/projects/{project_key}/skills/{directory}/file", dependencies=[Depends(require_web_user)])
+    async def api_save_skill_file(request: Request, project_key: ProjectKey, directory: str, command: SkillFileSave):
+        manager = project_skill_manager(request, project_key)
+        result = await asyncio.to_thread(manager.save_file, directory, command.path, command.content.encode("utf-8"), command.revision)
+        return await skill_result(request, project_key, result)
+
+    @application.post("/api/projects/{project_key}/skills/{directory}/upload", dependencies=[Depends(require_web_user)])
+    async def api_upload_skill_file(request: Request, project_key: ProjectKey, directory: str,
+                                   path: Annotated[str, Query(min_length=1, max_length=4096)],
+                                   revision: Annotated[str, Query(min_length=1, max_length=64)]):
+        manager = project_skill_manager(request, project_key)
+        content = await skill_body(request, skill_limits.max_bytes)
+        result = await asyncio.to_thread(manager.save_file, directory, path, content, revision, text_only=False)
+        return await skill_result(request, project_key, result)
+
+    @application.delete("/api/projects/{project_key}/skills/{directory}/file", dependencies=[Depends(require_web_user)])
+    async def api_delete_skill_file(request: Request, project_key: ProjectKey, directory: str,
+                                   path: Annotated[str, Query(min_length=1, max_length=4096)],
+                                   revision: Annotated[str, Query(min_length=1, max_length=64)]):
+        manager = project_skill_manager(request, project_key)
+        result = await asyncio.to_thread(manager.delete_file, directory, path, revision)
+        return await skill_result(request, project_key, result)
+
+    @application.patch("/api/projects/{project_key}/skills/{directory}", dependencies=[Depends(require_web_user)])
+    async def api_rename_skill(request: Request, project_key: ProjectKey, directory: str, command: SkillRename):
+        manager = project_skill_manager(request, project_key)
+        result = await asyncio.to_thread(manager.rename, directory, command.name, command.revision)
+        return await skill_result(request, project_key, result)
+
+    @application.delete("/api/projects/{project_key}/skills/{directory}", dependencies=[Depends(require_web_user)])
+    async def api_delete_skill(request: Request, project_key: ProjectKey, directory: str,
+                               revision: Annotated[str, Query(min_length=1, max_length=64)]):
+        manager = project_skill_manager(request, project_key)
+        await asyncio.to_thread(manager.delete, directory, revision)
+        return await skill_result(request, project_key)
 
     def attachment_store(request: Request, project_key: str) -> ConversationAttachmentStore:
         try:
