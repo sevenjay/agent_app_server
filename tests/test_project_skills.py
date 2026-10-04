@@ -49,12 +49,36 @@ def test_standard_rejects_invalid_names(name):
 @pytest.mark.parametrize("metadata", [
     "name: code-review\ndescription: 42", "name: code-review\ndescription: ok\ncompatibility: ''",
     "name: code-review\ndescription: ok\nmetadata: {version: 1}",
-    "name: code-review\ndescription: ok\nallowed-tools: [Read]",
+    "name: code-review\ndescription: ok\nlicense: [MIT]",
     "name: code-review\nname: overwritten\ndescription: ok",
     "name: &name code-review\ndescription: *name", "!!python/object:os.system {}",
 ])
 def test_standard_rejects_invalid_metadata(metadata):
     assert not validate_skill(f"---\n{metadata}\n---\n", "code-review")["valid"]
+
+
+@pytest.mark.parametrize("allowed_tools", [
+    "Read Glob Grep WebFetch WebSearch",
+    '"Read, Glob, Grep, WebFetch, WebSearch"',
+    "[Read, Glob, Grep, WebFetch, WebSearch, 'Bash(git:*)']",
+    "\n  - Read\n  - Glob\n  - Grep\n  - WebFetch\n  - WebSearch",
+    "[]",
+    "''",
+])
+def test_allowed_tools_accepts_strings_and_claude_code_lists(allowed_tools):
+    result = validate_skill(f"---\nname: code-review\ndescription: Review code.\nallowed-tools: {allowed_tools}\n---\n", "code-review")
+    assert result["valid"], result["errors"]
+    assert result["errors"] == []
+
+
+@pytest.mark.parametrize("allowed_tools", [
+    "42", "true", "null", "{Read: true}",
+    "[Read, 42]", "[Read, false]", "[Read, null]", "[Read, {tool: Grep}]", "[Read, [Grep]]",
+])
+def test_allowed_tools_rejects_non_strings_and_mixed_lists(allowed_tools):
+    result = validate_skill(f"---\nname: code-review\ndescription: Review code.\nallowed-tools: {allowed_tools}\n---\n", "code-review")
+    assert not result["valid"]
+    assert result["errors"] == ["allowed-tools must be a string or a list of strings."]
 
 
 def test_warnings_are_advisory_and_unknown_fields_are_allowed():
@@ -306,6 +330,45 @@ async def test_skills_api_complete_workflow_and_reload(tmp_path):
         assert (await client.get(base)).json()["data"] == []
         assert (await client.get("/api/projects/unknown/skills")).status_code == 404
         assert fake.skills_reload_requests[-1] == {"cwds": [str(tmp_path)], "forceReload": True}
+
+
+@pytest.mark.asyncio
+async def test_skills_api_supports_claude_code_tool_lists_and_preserves_source(tmp_path):
+    tools = "allowed-tools:\n  - Read\n  - Glob\n  - Grep\n  - WebFetch\n  - WebSearch\n"
+    fields = "compatibility: 'Claude Code 2.1.220+.'\ncontext: fork\nagent: backend-system-architect\n" + tools
+    source = skill_source().replace("x-vendor: true\n", "x-vendor: true\n" + fields)
+    root = install_skill(tmp_path)
+    (root / "SKILL.md").write_text(source)
+    app = create_app(codex_enabled=False, registry=ProjectRegistry([Project("project", "Project", tmp_path)]))
+    base = "/api/projects/project/skills"
+    async with application_client(app) as client:
+        listed = (await client.get(base)).json()["data"]
+        assert listed[0]["valid"] and listed[0]["errors"] == []
+        detail = (await client.get(base + "/code-review")).json()
+        assert detail["valid"]
+        opened = (await client.get(base + "/code-review/file", params={"path": "SKILL.md"})).json()
+        assert opened["content"] == source
+        edited = source + "\nAdded instructions.\n"
+        saved = await client.put(base + "/code-review/file", json={**opened, "content": edited})
+        assert saved.status_code == 200
+        assert saved.json()["skill"]["valid"]
+        assert (root / "SKILL.md").read_text() == edited
+        opened = (await client.get(base + "/code-review/file", params={"path": "SKILL.md"})).json()
+        rejected = await client.put(base + "/code-review/file", json={**opened, "content": edited.replace("  - Read", "  - 42")})
+        assert rejected.status_code == 400
+        assert "allowed-tools must be a string or a list of strings." in rejected.text
+        assert (root / "SKILL.md").read_text() == edited
+        renamed = await client.patch(base + "/code-review", json={"name": "review-code", "revision": saved.json()["skill"]["revision"]})
+        assert renamed.status_code == 200
+        assert renamed.json()["skill"]["valid"]
+        assert (tmp_path / ".agents/skills/review-code/SKILL.md").read_text() == edited.replace("name: code-review", 'name: "review-code"')
+        preview = await client.post(base + "/imports", content=archive({"SKILL.md": source}))
+        assert preview.status_code == 200
+        assert preview.json()["valid"] and preview.json()["token"]
+        imported = await client.post(base + "/imports/" + preview.json()["token"], json={"replace": False})
+        assert imported.status_code == 200
+        assert imported.json()["skill"]["valid"]
+        assert (root / "SKILL.md").read_text() == source
 
 
 @pytest.mark.asyncio

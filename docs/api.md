@@ -44,7 +44,32 @@ Projects 列在滑鼠 hover 或鍵盤 focus 時顯示三點選單，提供 Renam
 | `POST` | `/{directory}/upload?path=&revision=` | raw bytes 上傳附屬檔案；支援二進位資源 |
 | `DELETE` | `/{directory}/file?path=&revision=` | 刪除附屬檔案或目錄；revision 為整個 skill 的版本 |
 
-清單與詳細資料的 `valid` 表示符合 Agent Skills 格式；`errors` 與 `warnings` 分別是錯誤與建議。錯誤的既有 skill 仍可修正或刪除。symlink、特殊檔案或超出限制的目錄顯示為 `supported=false`，不提供修改操作。超過建議的 500 行只產生 warning。YAML 使用安全解析，拒絕重複 key、alias 與過深結構；其他擴充欄位和原文保留。
+清單與詳細資料的 `valid` 表示通過本服務的 Agent Skills 格式驗證，包含下述 Claude Code 相容格式；`errors` 與 `warnings` 分別是錯誤與建議。錯誤的既有 skill 仍可修正或刪除。symlink、特殊檔案或超出限制的目錄顯示為 `supported=false`，不提供修改操作。超過建議的 500 行只產生 warning。YAML 使用安全解析，拒絕重複 key、alias 與過深結構；其他擴充欄位和原文保留。
+
+`allowed-tools` 是可選欄位。Agent Skills 通用規範使用空白分隔字串；為相容 Claude Code，本服務也接受逗號分隔字串及 YAML 字串清單（行內或多行）。例如，以下四種寫法皆可通過驗證：
+
+```yaml
+allowed-tools: "Read Glob Grep WebFetch WebSearch"
+```
+
+```yaml
+allowed-tools: "Read, Glob, Grep, WebFetch, WebSearch"
+```
+
+```yaml
+allowed-tools: [Read, Glob, Grep, WebFetch, WebSearch]
+```
+
+```yaml
+allowed-tools:
+  - Read
+  - Glob
+  - Grep
+  - WebFetch
+  - WebSearch
+```
+
+驗證只檢查此欄位的型別，接受字串或每項皆為字串的清單（含空字串與空清單）；數字、布林、null、物件及含這些值的清單會產生 `allowed-tools must be a string or a list of strings.`。本服務不拆分、正規化或改寫工具名稱；清單、詳細資料、儲存、重新命名及匯入預覽／確認共用此驗證。工具名稱與權限的實際支援取決於執行 Skill 的 agent，`valid` 不保證執行時相容性。
 
 匯入只接受一個 skill：ZIP 的根層有 `SKILL.md`，或包在一層 skill 目錄內。資料夾名稱須與 frontmatter name 相符。忽略已驗證路徑上的 `.DS_Store`／`__MACOSX`；拒絕越界、symlink、特殊檔案、重複路徑與加密 ZIP。ZIP 保留一般 executable bit，不保留 setuid 等特殊權限。瀏覽器的目錄上傳無法提供原始 Unix executable bit；需保留時使用 ZIP。
 
@@ -56,7 +81,7 @@ Projects 列在滑鼠 hover 或鍵盤 focus 時顯示三點選單，提供 Renam
 
 下載整包 ZIP 與非文字預覽沿用 Files API。`skills_max_bytes` 預設 25 MiB，`skills_max_files` 預設 1000 個檔案／目錄；文字編輯上限 1 MiB。可在 `settings.toml` 調整整包限制及 `skills_import_ttl_seconds`。
 
-格式依據：[Agent Skills specification](https://agentskills.io/specification)；目錄與安裝方式參考 [Vercel Skills](https://github.com/vercel-labs/skills)。
+格式依據：[Agent Skills specification](https://agentskills.io/specification) 與 [Claude Code frontmatter reference](https://code.claude.com/docs/en/skills#frontmatter-reference)；目錄與安裝方式參考 [Vercel Skills](https://github.com/vercel-labs/skills)。
 
 ## Project files
 

@@ -108,9 +108,13 @@ def validate_skill(source: str, directory: str) -> dict[str, Any]:
     description = metadata.get("description")
     if not isinstance(description, str) or not description.strip() or len(description) > 1024:
         errors.append("description must be a non-empty string of at most 1024 characters.")
-    for key in ("license", "allowed-tools"):
-        if key in metadata and not isinstance(metadata[key], str):
-            errors.append(f"{key} must be a string.")
+    if "license" in metadata and not isinstance(metadata["license"], str):
+        errors.append("license must be a string.")
+    if "allowed-tools" in metadata:
+        value = metadata["allowed-tools"]
+        # Claude Code also accepts YAML lists alongside the Agent Skills string format.
+        if not (isinstance(value, str) or isinstance(value, list) and all(isinstance(tool, str) for tool in value)):
+            errors.append("allowed-tools must be a string or a list of strings.")
     if "compatibility" in metadata:
         value = metadata["compatibility"]
         if not isinstance(value, str) or not value.strip() or len(value) > 500:

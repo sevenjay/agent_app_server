@@ -30,7 +30,7 @@ Web console 觀察到的對話與執行軌跡會先寫入各 Project 的 per-thr
 - **對話附件**：Composer「＋」、拖放或貼圖加入 PNG/JPEG、UTF-8 `.txt`／`.md`／`.log`；每則需有文字說明，最多 5 檔、每檔 50 MiB、合計 250 MiB。支援新 Session／新 Turn，尚不支援 steer、`/goal`、PDF／Office／壓縮檔。已提交附件預設隨 Journal 保留 30 天，Fork 不複製附件。
 - **Long-running Goals**：可從 Inspector 或 composer `/goal` 指令啟動、查看、暫停、恢復與清除 Goal。
 - **檔案管理**：在 Files 分頁瀏覽 Project tree；懸浮於項目即可使用 Preview、Download、Rename、Delete、Info 圖示。支援新分頁預覽、目錄 ZIP 下載、上傳檔案、新增資料夾，以及列右側的 Git 變更狀態。
-- **Skills 管理**：Files 後的 `skills` 分頁管理各 Project 的 `.agents/skills/<skill-name>/`。支援整個資料夾／ZIP 匯入預覽、同名整包替換、標準格式驗證、SKILL.md 與附屬文字檔編輯、附屬檔案上傳、重新命名、ZIP 下載與刪除。儲存會檢查內容版本，並另外回報 Codex 重新掃描結果。
+- **Skills 管理**：Files 後的 `skills` 分頁管理各 Project 的 `.agents/skills/<skill-name>/`。支援整個資料夾／ZIP 匯入預覽、同名整包替換、格式驗證（含 Claude Code 的 `allowed-tools` 字串清單）、SKILL.md 與附屬文字檔編輯、附屬檔案上傳、重新命名、ZIP 下載與刪除。儲存會檢查內容版本，並另外回報 Codex 重新掃描結果。支援格式與範例見 [Project skills API 文件](docs/api.md#project-skills)。
 - **執行檢視**：Timeline、Live debug、Live changes、Files 與 skills 五個工作區視圖，支援桌面與手機版面。
 - **Runtime 狀態**：顯示 Codex account、usage limits、模型、reasoning effort 與服務 health。
 
