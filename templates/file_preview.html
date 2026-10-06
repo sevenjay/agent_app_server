@@ -16,7 +16,7 @@
     {% endif %}
   </head>
   <body class="file-preview-page">
-    <main class="file-preview-layout" data-file-name="{{ entry.name }}">
+    <main class="file-preview-layout" data-file-name="{{ entry.name }}" data-file-path="{{ entry.path }}" data-preview-url="{{ preview_url('') }}">
       <header class="file-preview-header">
         <nav class="file-preview-breadcrumbs pretty-scrollbar" aria-label="File path">
           <ol>

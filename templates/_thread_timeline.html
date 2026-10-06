@@ -38,6 +38,7 @@
 <div
   class="timeline-root"
   data-thread-id="{{ thread.id }}"
+  data-project-key="{{ thread.get('project_key', '') }}"
   data-journal-cursor="{{ thread.get('journal_cursor', 0) }}"
   data-journal-coverage="{{ thread.get('journal_coverage', 'absent') }}"
 >

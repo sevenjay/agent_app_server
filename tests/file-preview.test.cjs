@@ -6,8 +6,10 @@ const vm = require("node:vm");
 function element(extra = {}) {
   return {
     textContent: "", innerHTML: "", hidden: false, disabled: false, attrs: {}, events: {},
-    classList: { add() {} },
+    classList: new Set(),
     setAttribute(key, value) { this.attrs[key] = value; },
+    getAttribute(key) { return this.attrs[key] ?? null; },
+    before(node) { this.previousSibling = node; },
     addEventListener(name, callback) { this.events[name] = callback; },
     focus() { this.focused = true; },
     remove() { this.removed = true; },
@@ -15,9 +17,17 @@ function element(extra = {}) {
   };
 }
 
-function setup({ markdown = false, filename = "app.py", renderer = true, clipboard = true, fetchOK = true, copyOK = true, mermaid, diagrams = [], highlighter = true, download = "# Full raw file\r\nwith unseen content\r\n", saveResponse = { ok: true }, loadScript = (script) => queueMicrotask(() => script.onerror()), timers = { setTimeout, clearTimeout } } = {}) {
+function setup({
+  markdown = false, filename = "app.py", filePath = "README.md",
+  previewURL = "/api/projects/agent_app_server/files/preview?path=", rawText = "<script>raw</script>\n",
+  links = [], codeBlocks = [], renderer = true, clipboard = true, fetchOK = true, copyOK = true,
+  mermaid, diagrams = [], highlighter = true, download = "# Full raw file\r\nwith unseen content\r\n",
+  saveResponse = { ok: true }, loadScript = (script) => queueMicrotask(() => script.onerror()),
+  timers = { setTimeout, clearTimeout },
+} = {}) {
   const nodes = Object.fromEntries(["source", "plain", "status"].map((id) => [`file-preview-${id}`, element()]));
-  nodes["file-preview-source"].textContent = "<script>raw</script>\n";
+  nodes["file-preview-source"].textContent = rawText;
+  nodes["file-preview-source"].parentElement = element();
   nodes["file-copy-raw"] = element();
   nodes["file-edit"] = element({ disabled: true });
   nodes["file-save"] = element({ hidden: true, dataset: { saveUrl: "/files/upload?path=docs&name=app.py&overwrite=true" } });
@@ -27,7 +37,11 @@ function setup({ markdown = false, filename = "app.py", renderer = true, clipboa
   nodes["file-download"] = element({ href: "https://example.test/file/download" });
   nodes["file-render-status"] = element();
   if (markdown) {
-    nodes["file-preview-rendered"] = element({ hidden: true, querySelectorAll: () => diagrams });
+    nodes["file-preview-rendered"] = element({
+      hidden: true,
+      querySelectorAll: (selector) => selector === "a[href]" ? links
+        : selector === "pre > code.language-mermaid" ? diagrams : [...diagrams, ...codeBlocks],
+    });
     nodes["file-preview-tab"] = element({ disabled: true });
     nodes["file-plain-tab"] = element();
   }
@@ -39,7 +53,7 @@ function setup({ markdown = false, filename = "app.py", renderer = true, clipboa
   const window = {
     mermaid,
     addEventListener(name, callback) { events[name] = callback; },
-    location: { reload() { reloads += 1; } },
+    location: { href: "https://example.test" + previewURL, reload() { reloads += 1; } },
     hljs: highlighter ? {
       getLanguage: (language) => ["python", "javascript", "yaml", "ini"].includes(language),
       highlight: (text, options) => { highlighted.push({ text, ...options }); return { value: "escaped-highlight" }; },
@@ -51,7 +65,7 @@ function setup({ markdown = false, filename = "app.py", renderer = true, clipboa
   };
   vm.runInNewContext(readFileSync("static/js/file-preview.js", "utf8"), {
     window,
-    TextDecoder, TextEncoder,
+    TextDecoder, TextEncoder, URL,
     ...timers,
     navigator: { clipboard: clipboard ? { writeText: async (text) => copied.push(text) } : undefined },
     fetch: async (...args) => {
@@ -64,7 +78,7 @@ function setup({ markdown = false, filename = "app.py", renderer = true, clipboa
     },
     document: {
       getElementById: (id) => nodes[id] || null,
-      querySelector: () => ({ dataset: { fileName: filename } }),
+      querySelector: () => ({ dataset: { fileName: filename, filePath, previewUrl: previewURL } }),
       createElement: (tag) => tag === "textarea" ? textarea : element({ querySelector: () => ({}) }),
       body: { append() {} },
       head: { append(script) { scripts.push(script); loadScript(script); } },
@@ -76,13 +90,13 @@ function setup({ markdown = false, filename = "app.py", renderer = true, clipboa
 
 function diagramCode(textContent) {
   const replacements = [], notices = [];
-  return {
+  return element({
     textContent, classList: ["language-mermaid"], replacements, notices,
-    parentElement: {
+    parentElement: element({
       replaceWith: (node) => replacements.push(node),
       before: (node) => notices.push(node),
-    },
-  };
+    }),
+  });
 }
 
 const flush = () => new Promise((resolve) => setImmediate(resolve));
@@ -226,6 +240,62 @@ test("unknown files stay as plain text", () => {
   assert.equal(setup({ filename: "notes.unknown" }).highlighted.length, 0);
   assert.equal(setup({ filename: "notes.constructor" }).highlighted.length, 0);
   assert.equal(setup({ filename: "notes.__proto__" }).highlighted.length, 0);
+});
+
+for (const [rawText, expected] of [
+  ["", "1"], ["first", "1"], ["first\n", "1"], ["first\n\nlast\n", "1\n2\n3"],
+  ["first\r\nlast\r\n", "1\n2"], ["first\rlast\r", "1\n2"],
+]) {
+  test(`line numbers match source rows for ${JSON.stringify(rawText)}`, () => {
+    const { nodes } = setup({ rawText });
+    const code = nodes["file-preview-source"];
+    assert.equal(code.previousSibling.textContent, expected);
+    assert.equal(code.previousSibling.attrs["aria-hidden"], "true");
+    assert.equal(code.parentElement.classList.has("file-preview-numbered"), true);
+    assert.equal(code.textContent, rawText);
+  });
+}
+
+test("line numbers remain available when the highlighter fails to load", async () => {
+  const { nodes } = setup({ highlighter: false, rawText: "first\nsecond" });
+  await flush();
+  assert.equal(nodes["file-preview-source"].previousSibling.textContent, "1\n2");
+  assert.equal(nodes["file-copy-raw"].disabled, false);
+});
+
+test("Markdown code blocks have their own line numbers alongside highlighting", () => {
+  const code = element({ textContent: "print('first')\nprint('second')\n", classList: new Set(["language-python"]), parentElement: element() });
+  const { highlighted } = setup({ markdown: true, codeBlocks: [code] });
+  assert.equal(code.previousSibling.textContent, "1\n2");
+  assert.equal(highlighted[0].language, "python");
+  assert.equal(highlighted[0].text, "print('first')\nprint('second')\n");
+});
+
+test("Markdown relative file links open the project preview and preserve fragments", () => {
+  const hrefs = ["docs/api.md", "./docs/api.md#examples", "docs/API%20%E8%B3%87%E6%96%99%231.md", "src/app.py"];
+  const links = hrefs.map((href) => element({ attrs: { href } }));
+  setup({ markdown: true, links });
+  assert.equal(links[0].attrs.href, "/api/projects/agent_app_server/files/preview?path=docs%2Fapi.md");
+  assert.equal(links[1].attrs.href, "/api/projects/agent_app_server/files/preview?path=docs%2Fapi.md#examples");
+  assert.equal(new URL(links[2].attrs.href, "https://example.test").searchParams.get("path"), "docs/API 資料#1.md");
+  assert.equal(links[3].attrs.href, "/api/projects/agent_app_server/files/preview?path=src%2Fapp.py");
+});
+
+test("Markdown links resolve from the current document directory and retain show_hidden", () => {
+  const links = ["api.md", "../README.md", "./api.md#methods", "../../src/app.py"].map((href) => element({ attrs: { href } }));
+  setup({ markdown: true, filePath: "docs & 資料/guide/index.md", previewURL: "/api/projects/agent_app_server/files/preview?path=&show_hidden=true", links });
+  const destinations = links.map((link) => new URL(link.attrs.href, "https://example.test"));
+  assert.deepEqual(destinations.map((url) => url.searchParams.get("path")), ["docs & 資料/guide/api.md", "docs & 資料/README.md", "docs & 資料/guide/api.md", "src/app.py"]);
+  assert.equal(destinations.every((url) => url.searchParams.get("show_hidden") === "true"), true);
+  assert.equal(destinations[2].hash, "#methods");
+});
+
+test("Markdown preserves external, page, unrelated site, and malformed links", () => {
+  const hrefs = ["https://example.test/docs/api.md", "http://example.test/docs/api.md", "//example.test/docs/api.md", "mailto:dev@example.test", "tel:+123456789", "#section", "?tab=plain", "/settings", "../outside.md", "invalid%zz.md", ""];
+  const links = hrefs.map((href) => element({ attrs: { href } }));
+  const { nodes } = setup({ markdown: true, links });
+  assert.deepEqual(links.map((link) => link.attrs.href), hrefs);
+  assert.equal(nodes["file-preview-rendered"].hidden, false);
 });
 
 test("Copy raw reads the full file, preserving CRLF regardless of the active view", async () => {

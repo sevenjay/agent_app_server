@@ -2105,6 +2105,36 @@
     tab-size: 4;
   }
 
+  .file-preview-numbered {
+    display: flex;
+    gap: 1rem;
+  }
+
+  .file-preview-markdown pre.file-preview-numbered {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    line-height: 1.6;
+  }
+
+  .file-preview-numbered > code {
+    display: block;
+    flex: none;
+  }
+
+  .file-preview-line-numbers {
+    background: inherit;
+    border-right: 1px solid var(--color-surface-700);
+    color: var(--color-slate-500);
+    flex: none;
+    left: 0;
+    min-width: 3ch;
+    padding-right: 1rem;
+    position: sticky;
+    text-align: right;
+    user-select: none;
+    white-space: pre;
+  }
+
   .file-preview-editor {
     min-height: 65vh;
     resize: vertical;

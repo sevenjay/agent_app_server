@@ -4,6 +4,28 @@
 document.addEventListener("alpine:init", () => {
   let diagramId = 0;
   let renderQueue = Promise.resolve();
+
+  function rewriteFileLinks(el) {
+    const projectKey = el.closest(".timeline-root")?.dataset.projectKey;
+    if (!projectKey) return;
+    const filesRoot = new URL(`/api/projects/${encodeURIComponent(projectKey)}/files/`, window.location.href);
+    for (const link of el.querySelectorAll("a[href]")) {
+      const href = link.getAttribute("href").trim();
+      // Resolve relative file links from the session's project root.
+      if (!href || /^(?:[a-z][a-z0-9+.-]*:|\/\/|[?#])/i.test(href)) continue;
+      try {
+        const target = new URL(href, filesRoot);
+        if (target.origin !== filesRoot.origin || !target.pathname.startsWith(filesRoot.pathname)) continue;
+        const destination = new URL("preview", filesRoot);
+        destination.searchParams.set("path", decodeURIComponent(target.pathname.slice(filesRoot.pathname.length)));
+        destination.hash = target.hash;
+        link.setAttribute("href", destination.pathname + destination.search + destination.hash);
+      } catch {
+        // Leave malformed links readable without interrupting the message.
+      }
+    }
+  }
+
   window.mermaid?.initialize({
     startOnLoad: false,
     securityLevel: "sandbox",
@@ -21,6 +43,7 @@ document.addEventListener("alpine:init", () => {
       const { text = "", streaming = false } = value || {};
       Alpine.mutateDom(() => {
         el.innerHTML = window.renderMarkdown(text);
+        rewriteFileLinks(el);
       });
       if (streaming || !window.mermaid) return;
 

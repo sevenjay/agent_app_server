@@ -11,6 +11,42 @@
   const previewTab = document.getElementById("file-preview-tab");
   const plainTab = document.getElementById("file-plain-tab");
   const rawText = source.textContent;
+  const layout = document.querySelector("[data-file-name]");
+
+  function addLineNumbers(code) {
+    const lines = code.textContent.replace(/\r\n?/g, "\n").split("\n");
+    // A final newline terminates the last line; it does not add a visible row.
+    if (lines.length > 1 && lines.at(-1) === "") lines.pop();
+    const numbers = document.createElement("span");
+    numbers.className = "file-preview-line-numbers";
+    numbers.setAttribute("aria-hidden", "true");
+    numbers.textContent = Array.from({ length: lines.length }, (_, index) => index + 1).join("\n");
+    code.parentElement.classList.add("file-preview-numbered");
+    code.before(numbers);
+  }
+
+  function rewriteMarkdownLinks() {
+    const previewURL = new URL(layout.dataset.previewUrl, window.location.href);
+    const filesRoot = new URL("./", previewURL);
+    const currentFile = new URL(layout.dataset.filePath.split("/").map(encodeURIComponent).join("/"), filesRoot);
+    for (const link of rendered.querySelectorAll("a[href]")) {
+      const href = link.getAttribute("href").trim();
+      // Keep external URLs, other protocols, and links within this page intact.
+      if (!href || /^(?:[a-z][a-z0-9+.-]*:|\/\/|[?#])/i.test(href)) continue;
+      try {
+        const target = new URL(href, currentFile);
+        if (target.origin !== filesRoot.origin || !target.pathname.startsWith(filesRoot.pathname)) continue;
+        const destination = new URL(previewURL);
+        destination.searchParams.set("path", decodeURIComponent(target.pathname.slice(filesRoot.pathname.length)));
+        destination.hash = target.hash;
+        link.setAttribute("href", destination.pathname + destination.search + destination.hash);
+      } catch {
+        // Leave malformed links readable without interrupting the preview.
+      }
+    }
+  }
+
+  addLineNumbers(source);
 
   function loadLibrary(name, src, integrity) {
     if (window[name]) return Promise.resolve(window[name]);
@@ -116,6 +152,8 @@
         FORBID_ATTR: ["style"],
         SANITIZE_NAMED_PROPS: true,
       });
+      rewriteMarkdownLinks();
+      for (const code of rendered.querySelectorAll("pre > code")) addLineNumbers(code);
       previewTab.disabled = false;
       for (const tab of [previewTab, plainTab]) {
         tab.addEventListener("click", () => selectTab(tab));
@@ -144,7 +182,7 @@
       }
       return;
     }
-    const filename = document.querySelector("[data-file-name]").dataset.fileName.toLowerCase();
+    const filename = layout.dataset.fileName.toLowerCase();
     const extension = filename.includes(".") ? filename.split(".").pop() : "";
     const aliases = {
       py: "python", pyw: "python", js: "javascript", mjs: "javascript", cjs: "javascript", jsx: "javascript",

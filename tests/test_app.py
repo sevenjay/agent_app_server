@@ -878,6 +878,7 @@ async def test_timeline_turn_details_include_execution_metadata() -> None:
         timeline = await client.get("/partials/threads/thr_one/timeline")
 
     assert timeline.status_code == 200
+    assert 'data-project-key="agent_app_server"' in timeline.text
     assert 'aria-label="Turn details"' in timeline.text
     assert ">Turn ID</span>" in timeline.text
     assert ">Model</span>" in timeline.text

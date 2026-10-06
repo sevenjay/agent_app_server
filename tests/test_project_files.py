@@ -362,6 +362,8 @@ async def test_preview_breadcrumbs_link_each_directory_and_preserve_hidden_setti
     assert f'href="{base}?path=docs+%26+%E8%B3%87%E6%96%99&amp;show_hidden=true"' in page.text
     assert f'href="{base}?path=docs+%26+%E8%B3%87%E6%96%99%2Fapi+%231&amp;show_hidden=true"' in page.text
     assert '<span aria-current="page">api.md</span>' in page.text
+    assert 'data-file-path="docs &amp; 資料/api #1/api.md"' in page.text
+    assert f'data-preview-url="{base}?path=&amp;show_hidden=true"' in page.text
     assert "Parent folder" not in page.text and "<h1>api.md</h1>" not in page.text
     assert "&lt;script&gt;" in page.text and "<script>alert" not in page.text
     assert '<span aria-current="page">agent_app_server</span>' in root.text
