@@ -292,14 +292,15 @@ files = [
 
 [[package]]
 name = "httpcore2"
-version = "2.7.0"
+version = "2.13.1"
 description = "A minimal low-level HTTP client."
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
+markers = "sys_platform != \"emscripten\""
 files = [
-    {file = "httpcore2-2.7.0-py3-none-any.whl", hash = "sha256:1452f589fe23f55b44546cd884294c41a29330af902bc0b71a761fd52d18f92b"},
-    {file = "httpcore2-2.7.0.tar.gz", hash = "sha256:6dc0fedf329a52a990930a5579edfebaea81118ea700ea0dd7de2b5e5be49efc"},
+    {file = "httpcore2-2.13.1-py3-none-any.whl", hash = "sha256:e1e05d4f25f7d7d496bfb96748f6f4b67657b03da069b3a68c36069f3db73d0a"},
+    {file = "httpcore2-2.13.1.tar.gz", hash = "sha256:e0aa977abe17e69a3b820a24542a6fa88702676d83880b8d194dcd18408e5103"},
 ]
 
 [package.dependencies]
@@ -310,7 +311,7 @@ truststore = ">=0.10"
 asyncio = ["anyio (>=4.5.0,<5.0)"]
 http2 = ["h2 (>=3,<5)"]
 socks = ["socksio (==1.*)"]
-trio = ["trio (>=0.22.0,<1.0)"]
+trio = ["trio (>=0.34.0,<1.0)"]
 
 [[package]]
 name = "httptools"
@@ -374,30 +375,44 @@ files = [
 
 [[package]]
 name = "httpx2"
-version = "2.7.0"
+version = "2.13.1"
 description = "The next generation HTTP client."
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "httpx2-2.7.0-py3-none-any.whl", hash = "sha256:ed2a2719c696789e09493bd8e2bec3d8bd925cc6e26b68389ec25ade132f7bf4"},
-    {file = "httpx2-2.7.0.tar.gz", hash = "sha256:8b30709aed5c8465b0dd3b95c09ce301c8f79e7e7a2d00ab0af551e0d0375b07"},
+    {file = "httpx2-2.13.1-py3-none-any.whl", hash = "sha256:6dff50fabc270ee5fd25d845d0b078ed20564579744d6d962850975996d2f9a4"},
+    {file = "httpx2-2.13.1.tar.gz", hash = "sha256:e48744a19e3af5ee48313d0ce5fe941d5422fae5705ea922a4aabf94d7800dfa"},
 ]
 
 [package.dependencies]
-anyio = ">=4.10"
-httpcore2 = "2.7.0"
+anyio = {version = ">=4.10", markers = "sys_platform != \"emscripten\""}
+httpcore2 = {version = "2.13.1", markers = "sys_platform != \"emscripten\""}
+httpx2-jsfetch = {version = "*", markers = "sys_platform == \"emscripten\" and python_version >= \"3.12\""}
 idna = ">=3.18"
-truststore = ">=0.10"
+truststore = {version = ">=0.10", markers = "sys_platform != \"emscripten\""}
 typing-extensions = {version = ">=4.5.0", markers = "python_version < \"3.13\""}
 
 [package.extras]
-brotli = ["brotli ; platform_python_implementation == \"CPython\"", "brotlicffi ; platform_python_implementation != \"CPython\""]
-cli = ["click (>=8.4)", "pygments (==2.*)", "rich (>=10,<16)"]
+brotli = ["brotli (>=1.2.0) ; platform_python_implementation == \"CPython\"", "brotlicffi (>=1.2.0.2) ; platform_python_implementation != \"CPython\""]
+cli = ["click (>=8.4.2)", "pygments (==2.*)", "rich (>=10,<16)"]
 http2 = ["h2 (>=3,<5)"]
 socks = ["socksio (==1.*)"]
 ws = ["wsproto (>=1.2)"]
-zstd = ["zstandard (>=0.18.0) ; python_version <= \"3.13\""]
+zstd = ["backports-zstd (>=1.0.0) ; python_version <= \"3.13\""]
+
+[[package]]
+name = "httpx2-jsfetch"
+version = "1.0"
+description = "httpx2 transports for Emscripten/Pyodide, backed by the JavaScript fetch API."
+optional = false
+python-versions = ">=3.12"
+groups = ["main"]
+markers = "sys_platform == \"emscripten\""
+files = [
+    {file = "httpx2_jsfetch-1.0-py3-none-any.whl", hash = "sha256:cb916b707601e69a07721aabc8f3f6659be3a6893bc1ff5c6f9e02241df2da32"},
+    {file = "httpx2_jsfetch-1.0.tar.gz", hash = "sha256:70a0e3eabfef7cce5ad9c629f7d01ca05e418f586646f4ddf14782e4c1454c60"},
+]
 
 [[package]]
 name = "idna"
@@ -619,37 +634,37 @@ files = [
 
 [[package]]
 name = "openai-codex"
-version = "0.156.1"
+version = "0.160.1"
 description = "Python SDK for Codex"
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "openai_codex-0.156.1-py3-none-any.whl", hash = "sha256:6a11313e86027dd2da00f1af475388a578a19076ae8150b0f1c305d8564c973f"},
-    {file = "openai_codex-0.156.1.tar.gz", hash = "sha256:84de33cc7bf39f974423bd7568a5662d4eb1c685e6f9808c6160f1a68338a0c8"},
+    {file = "openai_codex-0.160.1-py3-none-any.whl", hash = "sha256:930e46e2153c00d76ff4e88e14eb7f694949244fb4be47d84394d736709e022e"},
+    {file = "openai_codex-0.160.1.tar.gz", hash = "sha256:747036e0489cbbad730874e6d50e7a6f8d06f1f54a980a849e2e11841f888ce7"},
 ]
 
 [package.dependencies]
-openai-codex-cli-bin = "0.156.1"
+openai-codex-cli-bin = "0.160.1"
 packaging = ">=26.2"
 pydantic = ">=2.12"
 
 [[package]]
 name = "openai-codex-cli-bin"
-version = "0.156.1"
+version = "0.160.1"
 description = "Pinned Codex CLI runtime for the Python SDK"
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "openai_codex_cli_bin-0.156.1-py3-none-macosx_10_9_x86_64.whl", hash = "sha256:142b29633e1c4a4cdb1ffb2c8d4cf334d0d0ab322673875802acfe562af05fd9"},
-    {file = "openai_codex_cli_bin-0.156.1-py3-none-macosx_11_0_arm64.whl", hash = "sha256:7cc8269e2af695d6b00be1a9d6f48243b3b992bce5f408b0910e75a369e67dd1"},
-    {file = "openai_codex_cli_bin-0.156.1-py3-none-manylinux_2_17_aarch64.whl", hash = "sha256:c725c0721949a81b2eae75e9468b280813a3e40bb3ce319b34f9bfbb69d4de0e"},
-    {file = "openai_codex_cli_bin-0.156.1-py3-none-manylinux_2_17_x86_64.whl", hash = "sha256:84a12567ca54ba6ae4ed755911c04e7cdf658315f8719963c8daa8592d8fe068"},
-    {file = "openai_codex_cli_bin-0.156.1-py3-none-musllinux_1_1_aarch64.whl", hash = "sha256:b81cc09f04575fa7471e39dad678700a7e209c81031a8f86cb175c1f6c0ace40"},
-    {file = "openai_codex_cli_bin-0.156.1-py3-none-musllinux_1_1_x86_64.whl", hash = "sha256:950627ab801703e061f2404105ed8216bb9728befbb09d853003a2678b9dbab2"},
-    {file = "openai_codex_cli_bin-0.156.1-py3-none-win_amd64.whl", hash = "sha256:81ab68fdadf448af52736282619875e10d365d93dd7442e94925899e77b99e7d"},
-    {file = "openai_codex_cli_bin-0.156.1-py3-none-win_arm64.whl", hash = "sha256:1b192fcbac53f4c13b7c637ab44d67f2731b700a8b32ae314d04b4f880e85a9f"},
+    {file = "openai_codex_cli_bin-0.160.1-py3-none-macosx_10_9_x86_64.whl", hash = "sha256:e4e14fb2697b785dbba29e1a59dbb1ca4b76a345c7cd601e98710bd8c1714b44"},
+    {file = "openai_codex_cli_bin-0.160.1-py3-none-macosx_11_0_arm64.whl", hash = "sha256:f720b95c0ac10ee9273faccc55473fc5fad82d3f5175dc99dcf6706a9ff52ae4"},
+    {file = "openai_codex_cli_bin-0.160.1-py3-none-manylinux_2_17_aarch64.whl", hash = "sha256:02bb2347ac8dee3109501c14f84a9046b03ceec5f469f1b0eb1ed16fab9ea660"},
+    {file = "openai_codex_cli_bin-0.160.1-py3-none-manylinux_2_17_x86_64.whl", hash = "sha256:dafe4e4fc0e560850fca28db8cd7e3c7263e22b764d57196c4854068ad17cc30"},
+    {file = "openai_codex_cli_bin-0.160.1-py3-none-musllinux_1_1_aarch64.whl", hash = "sha256:bd9c54481060723b769abbc7dd8bfcea682d1a69704ed1cd0f9b62a299a44162"},
+    {file = "openai_codex_cli_bin-0.160.1-py3-none-musllinux_1_1_x86_64.whl", hash = "sha256:534b044238c9d139512a5c4087b93490f4dbf6a0f0d41fc773a8c23c149aae74"},
+    {file = "openai_codex_cli_bin-0.160.1-py3-none-win_amd64.whl", hash = "sha256:56621eefc6d014e2ee7a40e9e41aa5653d832e5a23b0972d516981d18e4d7c57"},
+    {file = "openai_codex_cli_bin-0.160.1-py3-none-win_arm64.whl", hash = "sha256:7b4705636b227783aa2b0f5a4ce8613cd1b25d0d32f41b055bdef20b2ecd984b"},
 ]
 
 [[package]]
@@ -1241,6 +1256,7 @@ description = "Verify certificates using native system trust stores"
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
+markers = "sys_platform != \"emscripten\""
 files = [
     {file = "truststore-0.10.4-py3-none-any.whl", hash = "sha256:adaeaecf1cbb5f4de3b1959b42d41f6fab57b2b1666adb59e89cb0b53361d981"},
     {file = "truststore-0.10.4.tar.gz", hash = "sha256:9d91bd436463ad5e4ee4aba766628dd6cd7010cf3e2461756b3303710eebc301"},
@@ -1637,4 +1653,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12.3,<3.13"
-content-hash = "11fa54b4de41800cd0b665e9702b777188a184f0c04bb0b1947a848d4bb298f8"
+content-hash = "afdb519e952fa3b9f44b283f95851b8405161dd075e759931f9601dbb056f5c9"

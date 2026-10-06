@@ -16,8 +16,8 @@ dependencies = [
     "aiosqlite (>=0.21.0,<0.22.0)",
     "alembic (>=1.18.4,<2.0.0)",
     "apscheduler (>=3.11.2,<4.0.0)",
-    "httpx2 (>=2.7.0,<3.0.0)",
-    "openai-codex (>=0.147.0,<0.157.0)",
+    "httpx2 (>=2.10.0,<3.0.0)",
+    "openai-codex (>=0.160.0,<0.299.0)",
 ]
 
 [dependency-groups]
