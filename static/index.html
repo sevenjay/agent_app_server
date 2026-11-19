@@ -11,7 +11,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/tailwind.css">
+    <link rel="stylesheet" href="/static/css/tailwind.css?v=e97054e2">
 
     <script src="https://unpkg.com/htmx.org@4.0.0/dist/htmx.min.js"
       integrity="sha384-BvJpBiO8Kh31EqtJe5DRIeWrHWnCGkwytKs9NKFi86Hhw96dEqdEMzZDeK9iEGTc"
@@ -108,14 +108,15 @@
             <section class="mt-3">
               <div class="panel-heading">
                 <p class="section-kicker">Sessions</p>
-                <div class="flex items-center gap-3">
-                  <label class="flex items-center gap-2 text-xs text-slate-500">
-                    <input type="checkbox" x-model="archived" @change="sessionActionsThreadId = ''; refreshThreads()">
-                    Show archived
-                  </label>
+                <div class="flex flex-none items-center gap-2">
+                  <button class="button-secondary" type="button" aria-haspopup="dialog" @click="openSchedules()">Schedules</button>
                   <button class="icon-button" type="button" @click="newThread()" title="New session" aria-label="New session">＋</button>
                 </div>
               </div>
+              <label class="mt-2 flex items-center gap-2 text-xs text-slate-500">
+                <input type="checkbox" x-model="archived" @change="sessionActionsThreadId = ''; refreshThreads()">
+                Show archived
+              </label>
               <div id="thread-list" class="mt-2" @keydown.escape.window="sessionActionsThreadId = ''">
                 <p class="empty-state">Choose a project.</p>
               </div>
@@ -825,6 +826,135 @@
           </div>
         </aside>
       </main>
+
+      <dialog
+        x-ref="schedulesDialog"
+        aria-labelledby="schedules-title"
+        class="fixed inset-0 m-auto max-h-[85dvh] w-[calc(100%-2rem)] max-w-2xl overflow-auto rounded-lg border border-surface-600 bg-surface-900 p-4 text-slate-200 backdrop:bg-black/65 sm:p-6"
+      >
+        <header class="mb-4 flex items-center justify-between gap-3">
+          <h2 id="schedules-title" class="text-base font-semibold text-white">Schedules</h2>
+          <button class="icon-button" type="button" aria-label="Close schedules" @click="$refs.schedulesDialog.close()">×</button>
+        </header>
+        <p class="mb-3 text-sm text-red-300" role="alert" x-show="scheduleError" x-text="scheduleError"></p>
+
+        <div x-show="!scheduleDraft">
+          <div class="mb-3 flex flex-wrap gap-2">
+            <button type="button" class="button-primary" :disabled="scheduleBusy || !projects.length" @click="editSchedule()">New schedule</button>
+            <button type="button" class="button-secondary" :disabled="scheduleBusy" @click="refreshSchedules()">Refresh</button>
+          </div>
+          <p class="text-sm text-slate-400" role="status" x-show="scheduleBusy">Working…</p>
+          <p class="text-sm text-slate-400" x-show="!scheduleBusy && !scheduleError && !schedules.length">No schedules yet.</p>
+          <ul class="grid gap-2">
+            <template x-for="schedule in schedules" :key="schedule.id">
+              <li class="grid min-w-0 gap-2 rounded-md border border-surface-600 p-3 text-xs">
+                <div class="flex flex-wrap items-center justify-between gap-2 text-slate-400">
+                  <span x-text="projects.find(project => project.key === schedule.project_key)?.name || schedule.project_key"></span>
+                  <span :class="{ 'text-green-300': schedule.enabled }" x-text="schedule.enabled ? 'Enabled' : 'Disabled'"></span>
+                </div>
+                <p class="line-clamp-2 wrap-anywhere text-sm text-white" x-text="schedule.prompt"></p>
+                <p class="text-slate-300" x-text="`${schedule.frequency === 'daily' ? 'Daily' : schedule.days_of_week.join(', ')} · ${schedule.time} · ${schedule.timezone}`"></p>
+                <p class="text-slate-400" x-text="[modelDetails(schedule.model)?.display_name || schedule.model || 'Default model', schedule.reasoning_effort ? reasoningEffortLabel(schedule.reasoning_effort) : 'Default reasoning'].join(' · ')"></p>
+                <p x-show="schedule.next_run_at" class="text-slate-300">
+                  Next run <time :datetime="schedule.next_run_at" x-text="schedule.next_run_at?.slice(0, 16).replace('T', ' ')"></time>
+                </p>
+                <p x-show="schedule.last_run_at" class="text-slate-300">
+                  Last run <time :datetime="schedule.last_run_at" x-text="schedule.last_run_at?.slice(0, 16).replace('T', ' ')"></time>
+                </p>
+                <p x-show="schedule.last_run_error" class="text-red-300" x-text="schedule.last_run_error"></p>
+                <div class="flex flex-wrap gap-2">
+                  <button class="button-secondary" type="button" :disabled="scheduleBusy" @click="editSchedule(schedule)">Edit</button>
+                  <button class="button-secondary" type="button" :disabled="scheduleBusy" @click="updateSchedule(schedule.id, 'PATCH', { enabled: !schedule.enabled })" x-text="schedule.enabled ? 'Disable' : 'Enable'"></button>
+                  <button class="button-danger" type="button" :disabled="scheduleBusy" @click="if (window.confirm('Permanently delete this schedule? Past sessions will stay in the project.')) updateSchedule(schedule.id, 'DELETE')">Delete</button>
+                  <button class="button-secondary" type="button" x-show="schedule.last_thread_id" :disabled="scheduleBusy || composerSubmitting" @click="openScheduledSession(schedule)">Open latest session</button>
+                </div>
+              </li>
+            </template>
+          </ul>
+        </div>
+
+        <template x-if="scheduleDraft">
+          <form @submit.prevent="saveSchedule()">
+            <fieldset class="grid gap-3" :disabled="scheduleBusy">
+              <legend class="mb-3 text-sm font-semibold" x-text="scheduleDraft.id ? 'Edit schedule' : 'New schedule'"></legend>
+              <label class="grid gap-1 text-xs">
+                Project
+                <select class="model-select" x-model="scheduleDraft.project_key" required>
+                  <template x-for="project in projects" :key="project.key">
+                    <option :value="project.key" x-text="project.name"></option>
+                  </template>
+                </select>
+              </label>
+              <label class="grid gap-1 text-xs">
+                Prompt
+                <textarea class="model-select" x-model="scheduleDraft.prompt" rows="4" maxlength="200000" required></textarea>
+              </label>
+              <div class="grid gap-3 sm:grid-cols-2">
+                <label class="grid gap-1 text-xs">
+                  Model
+                  <select class="model-select" x-model="scheduleDraft.model" @change="scheduleDraft.reasoning_effort = ''">
+                    <option value="">Default model</option>
+                    <template x-if="scheduleDraft.model && !modelDetails(scheduleDraft.model)">
+                      <option :value="scheduleDraft.model" x-text="scheduleDraft.model"></option>
+                    </template>
+                    <template x-for="item in models" :key="item.id || item.model">
+                      <option :value="item.model || item.id" x-text="item.display_name || item.model || item.id"></option>
+                    </template>
+                  </select>
+                </label>
+                <label class="grid gap-1 text-xs">
+                  Reasoning
+                  <select class="model-select" x-model="scheduleDraft.reasoning_effort">
+                    <option value="">Model default</option>
+                    <template x-if="scheduleDraft.reasoning_effort && !reasoningEffortsFor(scheduleDraft.model).some(option => option.value === scheduleDraft.reasoning_effort)">
+                      <option :value="scheduleDraft.reasoning_effort" x-text="reasoningEffortLabel(scheduleDraft.reasoning_effort)"></option>
+                    </template>
+                    <template x-for="option in reasoningEffortsFor(scheduleDraft.model)" :key="option.value">
+                      <option :value="option.value" :title="option.description || null" x-text="reasoningEffortOptionLabel(option)"></option>
+                    </template>
+                  </select>
+                </label>
+                <label class="grid gap-1 text-xs">
+                  Repeat
+                  <select class="model-select" x-model="scheduleDraft.frequency">
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                  </select>
+                </label>
+                <label class="grid gap-1 text-xs">
+                  Local time
+                  <input class="model-select" type="time" x-model="scheduleDraft.time" required>
+                </label>
+              </div>
+              <fieldset class="flex flex-wrap gap-3 text-xs capitalize" x-show="scheduleDraft.frequency === 'weekly'">
+                <legend class="mb-1 normal-case">Days of the week</legend>
+                <template x-for="day in scheduleWeekdays" :key="day">
+                  <label class="flex items-center gap-1">
+                    <input type="checkbox" :value="day" x-model="scheduleDraft.days_of_week">
+                    <span x-text="day"></span>
+                  </label>
+                </template>
+              </fieldset>
+              <label class="grid gap-1 text-xs">
+                Time zone (IANA)
+                <input class="model-select" x-model="scheduleDraft.timezone" placeholder="Asia/Taipei" maxlength="255" spellcheck="false" required>
+              </label>
+              <label class="flex items-center gap-2 text-xs" x-show="scheduleDraft.id">
+                <input class="peer sr-only" type="checkbox" role="switch" x-model="scheduleDraft.enabled">
+                <span
+                  aria-hidden="true"
+                  class="relative h-4 w-8 shrink-0 rounded-full border border-surface-600 bg-surface-800 after:absolute after:top-0.5 after:left-0.5 after:size-2.5 after:rounded-full after:bg-white peer-checked:bg-brand-500 peer-checked:after:translate-x-4 peer-focus-visible:outline-2 peer-focus-visible:outline-brand-400"
+                ></span>
+                Enable schedule
+              </label>
+              <div class="flex flex-wrap gap-2">
+                <button class="button-primary" type="submit">Save schedule</button>
+                <button class="button-secondary" type="button" @click="scheduleDraft = null; scheduleError = ''">Cancel</button>
+              </div>
+            </fieldset>
+          </form>
+        </template>
+      </dialog>
 
       <nav class="mobile-nav lg:hidden" aria-label="Console panels">
         <button type="button" @click="mobileTab = 'sessions'" :class="{ 'mobile-nav-active': mobileTab === 'sessions' }">Sessions</button>

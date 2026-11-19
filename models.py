@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Index, String, Text, UniqueConstraint, func
+from sqlalchemy import JSON, Boolean, DateTime, Index, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -74,3 +74,26 @@ class AppSetting(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
+
+
+class Schedule(Base):
+    """A tenant's recurring prompt and its persisted dispatch cursor."""
+
+    __tablename__ = "schedules"
+    __table_args__ = (Index("ix_schedules_next_run_at", "next_run_at"),)
+
+    tenant_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    project_key: Mapped[str] = mapped_column(String(64))
+    prompt: Mapped[str] = mapped_column(Text)
+    model: Mapped[str | None] = mapped_column(String(100))
+    reasoning_effort: Mapped[str | None] = mapped_column(String(10))
+    frequency: Mapped[str] = mapped_column(String(6))
+    days_of_week: Mapped[list[str]] = mapped_column(JSON)
+    time: Mapped[str] = mapped_column(String(5))
+    timezone: Mapped[str] = mapped_column(String(255))
+    # UTC epoch seconds avoid SQLite's loss of UTC offsets on datetime columns.
+    next_run_at: Mapped[int | None] = mapped_column(Integer)
+    last_run_at: Mapped[int | None] = mapped_column(Integer)
+    last_thread_id: Mapped[str | None] = mapped_column(String(128))
+    last_run_error: Mapped[str | None] = mapped_column(Text)

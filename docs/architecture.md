@@ -20,7 +20,8 @@ flowchart LR
         journal["StreamJournal<br/>normalize、redact、durable sequence"]
         events["EventHub<br/>live fan-out、short cache"]
         metadata["Async SQLAlchemy<br/>UI metadata access"]
-        scheduler["APScheduler<br/>runtime health sample"]
+        scheduler["APScheduler<br/>runtime health sample、定時排程"]
+        scheduled_prompts["ScheduledPrompts<br/>查詢到期排程、送出 Prompt"]
     end
 
     codex["Codex app-server<br/>Thread／Turn store"]
@@ -52,6 +53,9 @@ flowchart LR
     codex <-->|read / write workspace| projects
     journal -->|.stream_journal JSONL| projects
     metadata --> sqlite
+    scheduler --> scheduled_prompts
+    scheduled_prompts --> sqlite
+    scheduled_prompts --> service
     scheduler -.->|status| web
     web -.-> logs
     runtime -.-> logs
@@ -82,8 +86,9 @@ flowchart LR
 | `TurnManager` | 原子保留 Turn、維持 active handle/task、排除衝突 mutation、shutdown drain | Process memory |
 | `StreamJournal` | SDK event normalize／redact、per-thread JSONL append、durable sequence、history backfill、Timeline materialization、retention／trash | Project persistent data |
 | `EventHub` | 已持久事件的即時 fan-out、短期 cache、bounded subscriber queue | Process memory |
-| SQLAlchemy / SQLite | Pin、label、last-opened 與最後選擇等 Web UI metadata | Persistent |
-| APScheduler | 低頻 scheduler liveness sample | Process |
+| SQLAlchemy / SQLite | Web UI metadata、排程設定與下次執行時間 | Persistent |
+| APScheduler | 定期取樣服務狀態，觸發定時排程查詢 | Process |
+| `ScheduledPrompts` | 先更新下次執行時間，再以排程擁有者的身分建立 Session 並送出 Prompt | ASGI lifespan |
 | Jinja2 / HTMX / Alpine.js | Server-rendered partials、browser interaction、目前 Thread 的 `EventSource` 與 per-Thread replay cursor | Browser memory / request |
 
 ## 資料權責
@@ -98,12 +103,12 @@ flowchart TB
 
     journal --> journal_data["Web Timeline 主要持久來源<br/>messages、commands、tools、順序、durable cursor"]
     codex --> codex_data["Thread lifecycle、Goal、最終狀態<br/>absent／partial conversation fallback"]
-    sqlite --> ui_data["非權威 UI metadata<br/>pin、custom label、last-opened、last selection"]
+    sqlite --> ui_data["UI metadata 與排程設定<br/>pin、custom label、last-opened、last selection、下次執行時間"]
     memory --> live_data["暫時執行狀態<br/>active Turn、subscriber queues、pending Threads"]
     workspace --> files["Project 檔案<br/>Codex 實際讀寫的 CWD"]
 ```
 
-SQLite 不鏡像 prompt、agent response、command output、diff、Goal、token 或 Codex conversation。已送往 SSE 的 sequence 來自 Stream Journal，backend restart 後仍可 replay；active Turn／Goal handle、subscriber queue 與新建後尚未出現在 SDK list 的 pending Thread 則仍是 process-local。Journal absent／partial 時才以 Codex history 補 conversation，Journal 獨有的 command／tool activity 不會被覆蓋。
+SQLite 儲存排程設定。排程觸發後，對話與相關執行記錄沿用既有的 Stream Journal 與 Codex history。已送往 SSE 的 sequence 來自 Stream Journal，backend restart 後仍可 replay；active Turn／Goal handle、subscriber queue 與新建後尚未出現在 SDK list 的 pending Thread 則仍是 process-local。Journal absent／partial 時才以 Codex history 補 conversation，Journal 獨有的 command／tool activity 不會被覆蓋。
 
 ## Process 與 ASGI lifecycle
 
@@ -131,10 +136,12 @@ sequenceDiagram
     Runtime->>Runtime: 啟動定期 account-limit health sampler
     Runtime->>Runtime: 建立 CodexService
     Runtime-->>ASGI: ready
+    ASGI->>Scheduler: 登記定時排程工作
 
     Note over Uvicorn,Codex: 接受 HTTP、SSE 與 Turn
 
     Uvicorn->>ASGI: lifespan shutdown
+    ASGI->>Scheduler: 移除定時排程工作
     ASGI->>Runtime: close()
     Runtime->>Runtime: 停止接受 Turns、account-limit sampler、interrupt / drain pumps
     Runtime->>Codex: __aexit__()

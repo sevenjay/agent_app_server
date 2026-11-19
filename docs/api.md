@@ -11,8 +11,8 @@ Web UI 稱一段對話為 Session；API 與 Codex SDK 使用 Thread／`thread`�
 | `GET` | `/api/status` | Database、scheduler 與 Codex runtime health |
 | `GET` | `/api/projects` | 列出可見 Projects |
 | `POST` | `/api/projects` | 在設定的 root 建立一個 Project 目錄 |
-| `PATCH` | `/api/projects/{project_key}` | 以 `{"name": "新名稱"}` 實際更名專案目錄，更新 Sessions 的 CWD 與 UI metadata |
-| `DELETE` | `/api/projects/{project_key}` | 遞迴刪除專案目錄及其中檔案，清除選取狀態與 Session UI metadata |
+| `PATCH` | `/api/projects/{project_key}` | 以 `{"name": "新名稱"}` 更名專案目錄，同步更新 Sessions 與排程的專案 |
+| `DELETE` | `/api/projects/{project_key}` | 遞迴刪除專案目錄及其中檔案，清除選取狀態、Session UI metadata 與排程 |
 | `GET` | `/api/codex/account` | Codex account 與 usage limits |
 | `POST` | `/api/codex/rate-limit-reset-credits/consume` | 在 5h 或 Weekly limit 剩餘不超過 1% 時使用一張 reset credit |
 | `GET` | `/api/codex/models` | 可用 models 與 reasoning efforts |
@@ -22,6 +22,35 @@ Web UI 稱一段對話為 Session；API 與 Codex SDK 使用 Thread／`thread`�
 `POST /api/projects` 只接受單一目錄名稱。Browser 不會提交任意 absolute CWD。
 
 Projects 列在滑鼠 hover 或鍵盤 focus 時顯示三點選單，提供 Rename／Delete；觸控裝置持續顯示。更名與刪除僅支援設定 root 下的直接專案目錄，需要 Codex runtime 可用；專案有活動中的 Turn／Goal 時回 `409`。更名保留既有 Sessions（包括封存狀態），且不覆寫既有目錄。刪除前會顯示專案路徑並要求確認；刪除範圍包含專案內的 Journal 與附件，Codex 在專案外保存的 Thread 記錄不會一併刪除。
+
+## 定時排程
+
+在 Web console 的 **Sessions → Schedules** 開啟排程清單。選擇 **New schedule**，填寫專案、Prompt、模型與推理強度，再設定每日或每週的時間與時區。編輯時可使用 **Enable schedule** 開關。每次觸發會在該專案新增一個 Session，卡片會顯示上次執行時間。對應的 Session 仍存在時，可選擇 **Open latest session** 開啟。
+
+| 方法 | 路徑 | 用途 |
+| --- | --- | --- |
+| `GET` | `/api/schedules` | 列出目前使用者的排程，回傳 `{data: [...]}` |
+| `POST` | `/api/schedules` | 建立排程，回傳 `201` 與排程資料 |
+| `PUT` | `/api/schedules/{schedule_id}` | 更新完整排程設定，回傳更新後的排程 |
+| `PATCH` | `/api/schedules/{schedule_id}` | 以 `{"enabled": true}` 啟用或以 `{"enabled": false}` 停用 |
+| `DELETE` | `/api/schedules/{schedule_id}` | 刪除排程，成功回傳 `204`。既有 Sessions 仍可查看 |
+
+`POST` 和 `PUT` 使用相同的 JSON 欄位。
+
+| 欄位 | 說明 |
+| --- | --- |
+| `project_key` | 必填字串，指定 Session 所屬的專案 |
+| `prompt` | 必填字串，最多 200,000 個字元 |
+| `model`、`reasoning_effort` | 選填字串，使用 `/api/codex/models` 提供的模型與推理強度。省略或傳入 `null` 時使用現有預設值 |
+| `frequency` | 必填，接受 `daily` 或 `weekly` |
+| `days_of_week` | 每週排程至少指定一天，接受 `mon`、`tue`、`wed`、`thu`、`fri`、`sat`、`sun`。每日排程使用空陣列，可省略 |
+| `time` | 必填字串，使用 24 小時制 `HH:MM` |
+| `timezone` | 必填字串，使用 IANA 時區名稱，例如 `Asia/Taipei` |
+| `enabled` | 選填布林值。`POST` 省略時預設為 `true`，`PUT` 省略時保留原有狀態 |
+
+`next_run_at` 和 `last_run_at` 以 ISO 8601 格式回傳，包含排程時區的 UTC 偏移量。停用時 `next_run_at` 為 `null`。刪除最近一次執行的 Session 後，清單中的 `last_thread_id` 為 `null`，並保留 `last_run_at`。若送出 Prompt 失敗，`last_run_error` 會顯示原因。找不到排程或專案時回傳 `404`，欄位驗證失敗時回傳 `422`。
+
+排程儲存於 SQLite，並由 `scheduler_enabled` 控制自動執行。服務恢復時，原定時間距現在 5 分鐘以內的執行會補跑一次，超過 5 分鐘則等待下一次。切換夏令時間時，略過不存在的本地時間。秋季同一時間出現兩次時，在第一次出現時執行。停用或刪除排程後，已經送出的執行會繼續。
 
 ## Project skills
 

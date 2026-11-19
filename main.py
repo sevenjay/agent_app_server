@@ -8,7 +8,7 @@ import json
 import os
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,7 +20,7 @@ from fastapi import Path as PathParameter
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import delete, select, update
+from sqlalchemy import case, delete, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.background import BackgroundTask
@@ -31,16 +31,18 @@ from codex_runtime import CodexRuntime
 from codex_service import (
     CodexService,
     ConsoleBadRequest,
+    ConsoleConflict,
     ConsoleNotFound,
     ConsoleProjectExists,
     ConsoleProjectUnavailable,
     ConsoleServiceError,
+    ConsoleUnavailable,
 )
 from config import APP_VERSION, BASE_DIR, environment_settings, settings
 from conversation_attachments import ConversationAttachmentStore
 from database import database_status, dispose_engine, get_session, init_db
 from event_hub import EventEnvelope
-from models import AppSetting, ThreadUIMetadata
+from models import AppSetting, Schedule, ThreadUIMetadata
 from project_files import (
     ProjectFileError,
     ProjectFileManager,
@@ -58,6 +60,7 @@ from projects import (
 )
 from runtime import ensure_log_directory, run_web_server
 from scheduler_runtime import scheduler_status, start_scheduler, stop_scheduler
+from schedules import ScheduledPrompts, next_run_at, schedule_view
 from schemas import (
     GoalStart,
     GoalUpdate,
@@ -66,6 +69,8 @@ from schemas import (
     ProjectDirectoryCreate,
     ProjectFileRename,
     ProjectKey,
+    ScheduleEnable,
+    ScheduleSettings,
     SkillCreate,
     SkillRename,
     SkillFileSave,
@@ -91,6 +96,7 @@ ThreadId = Annotated[
     str,
     PathParameter(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$"),
 ]
+ScheduleId = Annotated[str, PathParameter(pattern=r"^[a-f0-9]{32}$")]
 
 
 def _request_id(request: Request) -> str:
@@ -313,6 +319,7 @@ def create_app(
         import_ttl_seconds=int(getattr(settings, "skills_import_ttl_seconds", 1800)),
     )
     skill_imports = SkillImportStore(skill_limits)
+    scheduled_prompts = ScheduledPrompts(codex_runtime, tenant_workspace_manager)
 
     @asynccontextmanager
     async def lifespan(application: FastAPI):
@@ -320,11 +327,15 @@ def create_app(
         await application.state.codex_runtime.start()
         LOGD("console_lifespan_ready")
         try:
+            scheduled_prompts.start()
             yield
         finally:
             LOGD("console_lifespan_shutdown")
             try:
-                await application.state.codex_runtime.close()
+                try:
+                    await scheduled_prompts.stop()
+                finally:
+                    await application.state.codex_runtime.close()
             finally:
                 await asyncio.to_thread(skill_imports.close)
 
@@ -497,6 +508,131 @@ def create_app(
     ) -> dict[str, object]:
         return await _status_payload(request, session)
 
+    async def schedule_views(request: Request, schedules: Iterable[Schedule]) -> list[dict[str, Any]]:
+        data = [schedule_view(schedule) for schedule in schedules]
+        linked = [view for view in data if view["last_thread_id"] is not None]
+        if linked:
+            try:
+                service = _service(request)
+            except ConsoleUnavailable:
+                return data
+            results = await asyncio.gather(*(
+                service.has_thread_in_project(view["last_thread_id"], project_key=view["project_key"]) for view in linked
+            ))
+            for view, exists in zip(linked, results, strict=True):
+                if exists is False:
+                    view["last_thread_id"] = None
+        return data
+
+    @application.get("/api/schedules")
+    async def api_list_schedules(
+        request: Request,
+        owner: Annotated[WebUserContext, Depends(require_web_user)],
+        session: Annotated[AsyncSession, Depends(get_session)],
+    ) -> dict[str, Any]:
+        schedules = await session.scalars(
+            select(Schedule).where(Schedule.tenant_id == owner.tenant_id)
+            .order_by(Schedule.project_key, Schedule.next_run_at.is_(None), Schedule.next_run_at, Schedule.id)
+        )
+        return {"data": await schedule_views(request, schedules)}
+
+    def schedule_values(command: ScheduleSettings, owner: WebUserContext) -> dict[str, Any]:
+        try:
+            owner.registry.get(command.project_key)
+        except UnknownProjectError as exc:
+            raise ConsoleNotFound from exc
+        return {
+            **command.model_dump(exclude={"enabled"}),
+            "next_run_at": next_run_at(
+                time=command.time, timezone=command.timezone, days_of_week=command.days_of_week,
+                after=datetime.now(timezone.utc),
+            ) if command.enabled else None,
+        }
+
+    @application.post("/api/schedules", status_code=status.HTTP_201_CREATED)
+    async def api_create_schedule(
+        command: ScheduleSettings,
+        owner: Annotated[WebUserContext, Depends(require_web_user)],
+        session: Annotated[AsyncSession, Depends(get_session)],
+    ) -> dict[str, Any]:
+        schedule = Schedule(id=uuid.uuid4().hex, tenant_id=owner.tenant_id, **schedule_values(command, owner))
+        session.add(schedule)
+        await session.commit()
+        return schedule_view(schedule)
+
+    @application.put("/api/schedules/{schedule_id}")
+    async def api_replace_schedule(
+        request: Request,
+        schedule_id: ScheduleId,
+        command: ScheduleSettings,
+        owner: Annotated[WebUserContext, Depends(require_web_user)],
+        session: Annotated[AsyncSession, Depends(get_session)],
+    ) -> dict[str, Any]:
+        same_project = Schedule.project_key == command.project_key
+        values = schedule_values(command, owner)
+        if "enabled" not in command.model_fields_set:
+            # Preserve the state at update time, even if a concurrent request toggled the schedule.
+            values["next_run_at"] = case((Schedule.next_run_at.is_not(None), values["next_run_at"]))
+        schedule = await session.scalar(
+            update(Schedule).where(Schedule.tenant_id == owner.tenant_id, Schedule.id == schedule_id)
+            .values(
+                **values,
+                last_run_at=case((same_project, Schedule.last_run_at)),
+                last_thread_id=case((same_project, Schedule.last_thread_id)),
+                last_run_error=case((same_project, Schedule.last_run_error)),
+            )
+            .returning(Schedule)
+        )
+        if schedule is None:
+            raise ConsoleNotFound
+        await session.commit()
+        return (await schedule_views(request, [schedule]))[0]
+
+    @application.patch("/api/schedules/{schedule_id}")
+    async def api_enable_schedule(
+        request: Request,
+        schedule_id: ScheduleId,
+        command: ScheduleEnable,
+        owner: Annotated[WebUserContext, Depends(require_web_user)],
+        session: Annotated[AsyncSession, Depends(get_session)],
+    ) -> dict[str, Any]:
+        schedule = await session.get(Schedule, (owner.tenant_id, schedule_id))
+        if schedule is None:
+            raise ConsoleNotFound
+        if command.enabled == (schedule.next_run_at is not None):
+            return (await schedule_views(request, [schedule]))[0]
+        statement = update(Schedule).where(Schedule.tenant_id == owner.tenant_id, Schedule.id == schedule_id)
+        due = None
+        if command.enabled:
+            # Ensure that the rule used to calculate the next run is still current when enabling.
+            statement = statement.where(
+                Schedule.next_run_at.is_(None), Schedule.time == schedule.time,
+                Schedule.timezone == schedule.timezone, Schedule.days_of_week == schedule.days_of_week,
+            )
+            due = next_run_at(
+                time=schedule.time, timezone=schedule.timezone, days_of_week=schedule.days_of_week,
+                after=datetime.now(timezone.utc),
+            )
+        updated = await session.scalar(statement.values(next_run_at=due).returning(Schedule))
+        if updated is None:
+            raise ConsoleConflict
+        await session.commit()
+        return (await schedule_views(request, [updated]))[0]
+
+    @application.delete("/api/schedules/{schedule_id}", status_code=status.HTTP_204_NO_CONTENT)
+    async def api_delete_schedule(
+        schedule_id: ScheduleId,
+        owner: Annotated[WebUserContext, Depends(require_web_user)],
+        session: Annotated[AsyncSession, Depends(get_session)],
+    ) -> Response:
+        deleted_id = await session.scalar(
+            delete(Schedule).where(Schedule.tenant_id == owner.tenant_id, Schedule.id == schedule_id).returning(Schedule.id)
+        )
+        if deleted_id is None:
+            raise ConsoleNotFound
+        await session.commit()
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
     @application.get(
         "/api/projects",
         dependencies=[Depends(require_web_user)],
@@ -554,6 +690,10 @@ def create_app(
             .where(ThreadUIMetadata.tenant_id == context.tenant_id, ThreadUIMetadata.project_key == project_key)
             .values(project_key=project.key)
         )
+        await session.execute(
+            update(Schedule).where(Schedule.tenant_id == context.tenant_id, Schedule.project_key == project_key)
+            .values(project_key=project.key)
+        )
         selected = await session.get(AppSetting, (context.tenant_id, "selected_project_key"))
         if selected is not None and selected.setting_value == project_key:
             selected.setting_value = project.key
@@ -577,6 +717,7 @@ def create_app(
                 ThreadUIMetadata.tenant_id == context.tenant_id, ThreadUIMetadata.project_key == project_key,
             )
         )
+        await session.execute(delete(Schedule).where(Schedule.tenant_id == context.tenant_id, Schedule.project_key == project_key))
         selected = await session.get(AppSetting, (context.tenant_id, "selected_project_key"))
         if selected is not None and selected.setting_value == project_key:
             await session.delete(selected)
@@ -1156,13 +1297,14 @@ def create_app(
         session: Annotated[AsyncSession, Depends(get_session)],
     ) -> Response:
         await _service(request).delete_thread(thread_id)
-        metadata = await session.get(
-            ThreadUIMetadata,
-            (_web_user(request).tenant_id, thread_id),
+        tenant_id = _web_user(request).tenant_id
+        await session.execute(
+            delete(ThreadUIMetadata).where(ThreadUIMetadata.tenant_id == tenant_id, ThreadUIMetadata.thread_id == thread_id)
         )
-        if metadata is not None:
-            await session.delete(metadata)
-            await session.commit()
+        await session.execute(
+            update(Schedule).where(Schedule.tenant_id == tenant_id, Schedule.last_thread_id == thread_id).values(last_thread_id=None)
+        )
+        await session.commit()
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @application.post(

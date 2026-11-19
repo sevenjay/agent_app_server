@@ -11,12 +11,14 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import database
 from config import BASE_DIR
-from database_schema import INITIAL_REVISION, TENANT_REVISION
+from database_schema import INITIAL_REVISION
 from main import create_app
 from models import Base, Tenant
 from tenancy import LOCAL_TENANT_ID, TenantWorkspaceManager
 from tests.fakes import FakeCodex
 from tests.http_client import application_client
+
+SCHEDULE_REVISION = "20261119_0003"
 
 
 def _config() -> Config:
@@ -67,7 +69,7 @@ def test_upgrade_preserves_legacy_metadata(
 
     with sqlite3.connect(path) as connection:
         assert connection.execute("PRAGMA integrity_check").fetchone() == ("ok",)
-        assert connection.execute("SELECT * FROM alembic_version").fetchall() == [(TENANT_REVISION,)]
+        assert connection.execute("SELECT * FROM alembic_version").fetchall() == [(SCHEDULE_REVISION,)]
         assert connection.execute("SELECT * FROM app_settings").fetchall() == [
             (LOCAL_TENANT_ID, *row) for row in preferences
         ]
@@ -119,7 +121,7 @@ def test_upgrade_adopts_current_unversioned_schema_without_reassigning_tenants(
     with sqlite3.connect(path) as connection:
         for name, rows in before.items():
             assert connection.execute(f"SELECT * FROM {name}").fetchall() == rows
-        assert connection.execute("SELECT * FROM alembic_version").fetchall() == [(TENANT_REVISION,)]
+        assert connection.execute("SELECT * FROM alembic_version").fetchall() == [(SCHEDULE_REVISION,)]
 
 
 @pytest.mark.parametrize("change", [
@@ -164,6 +166,7 @@ def test_offline_upgrade_still_emits_complete_schema() -> None:
     assert "CREATE TABLE thread_ui_metadata (" in sql
     assert "CREATE TABLE tenants (" in sql
     assert "INSERT INTO app_settings_tenant" in sql
+    assert "CREATE TABLE IF NOT EXISTS schedules (" in sql
 
 
 @pytest.mark.asyncio

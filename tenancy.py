@@ -250,6 +250,20 @@ class TenantWorkspaceManager:
             username=raw_username.strip(),
             directory_name=directory_name,
         )
+        return self._context_for_tenant(tenant)
+
+    async def resolve_stored(self, tenant_id: str, session: AsyncSession) -> WebUserContext:
+        """Resolve the persisted owner of background work without request headers."""
+        if self._single_context is not None:
+            if tenant_id == self._single_context.tenant_id:
+                return self._single_context
+        else:
+            tenant = await session.get(Tenant, tenant_id)
+            if tenant is not None:
+                return self._context_for_tenant(tenant)
+        raise WebIdentityRequired
+
+    def _context_for_tenant(self, tenant: Tenant) -> WebUserContext:
         cached = self._contexts.get(tenant.tenant_id)
         if cached is not None and cached.username == tenant.username:
             return cached

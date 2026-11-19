@@ -918,12 +918,13 @@ class CodexService:
         model: str | None,
         reasoning_effort: str | None,
         attachment_ids: list[str] | None = None,
+        name: str | None = None,
     ) -> dict[str, Any]:
         project = self._project(project_key)
         if attachment_ids:
             self._validate_attachment_prompt(prompt)
             await run_in_threadpool(ConversationAttachmentStore(project).validate_pending, attachment_ids)
-        title = await self._generate_session_title(project, prompt)
+        title = name if name is not None else await self._generate_session_title(project, prompt)
         thread = await self.create_thread(
             project_key=project_key,
             name=title,
@@ -1082,6 +1083,28 @@ class CodexService:
 
     async def snapshot_thread(self, thread_id: str) -> dict[str, Any]:
         return await self.read_thread(thread_id, include_turns=True)
+
+    async def has_thread_in_project(self, thread_id: str, *, project_key: str) -> bool | None:
+        """Check a stored session link without opening its conversation history."""
+        try:
+            project = self._project(project_key)
+            pending = self._pending_threads.get(thread_id)
+            thread = pending.handle if pending is not None else AsyncThread(self.codex, thread_id)
+            try:
+                response = await self._call(
+                    thread.read(include_turns=False),
+                    operation="thread_read_schedule",
+                    allow_unloaded_thread=True,
+                )
+            except (InvalidRequestError, ConsoleUnavailable):
+                # A stored session can still exist when its handle is unavailable.
+                return await self._thread_is_listed_in_project(thread_id, project)
+            actual = field(response, "thread")
+            return str(field(actual, "id", "")) == thread_id and self.registry.project_for_path(field(actual, "cwd", "")) == project
+        except ConsoleNotFound:
+            return False
+        except ConsoleServiceError:
+            return None
 
     async def journal_cursor(self, thread_id: str) -> int:
         project = self._thread_projects.get(thread_id)

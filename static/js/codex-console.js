@@ -45,6 +45,11 @@ window.codexConsole = function codexConsole() {
     activeKind: null,
     sessionStatus: { type: "idle", activeFlags: [] },
     models: [],
+    schedules: [],
+    scheduleDraft: null,
+    scheduleBusy: false,
+    scheduleError: "",
+    scheduleWeekdays: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
     archived: false,
     sessionActionsThreadId: "",
     draftSession: false,
@@ -216,7 +221,11 @@ window.codexConsole = function codexConsole() {
     },
 
     get reasoningEffortOptions() {
-      const model = this.modelDetails(this.model);
+      return this.reasoningEffortsFor(this.model);
+    },
+
+    reasoningEffortsFor(modelId) {
+      const model = this.modelDetails(modelId);
       const options =
         model?.supported_reasoning_efforts ||
         model?.supportedReasoningEfforts ||
@@ -416,9 +425,91 @@ window.codexConsole = function codexConsole() {
         );
         error.code = payload?.error?.code || "request_failed";
         error.status = response.status;
+        error.details = payload?.detail;
         throw error;
       }
       return payload;
+    },
+
+    async openSchedules() {
+      this.scheduleDraft = null;
+      this.$refs.schedulesDialog.showModal();
+      await this.refreshSchedules();
+    },
+
+    async refreshSchedules() {
+      if (this.scheduleBusy) return;
+      this.scheduleBusy = true;
+      this.scheduleError = "";
+      try {
+        this.schedules = (await this.api("/api/schedules")).data;
+      } catch (error) {
+        this.scheduleError = error.message;
+      } finally {
+        this.scheduleBusy = false;
+      }
+    },
+
+    editSchedule(schedule) {
+      this.scheduleError = "";
+      this.scheduleDraft = schedule
+        ? { ...schedule, days_of_week: [...schedule.days_of_week] }
+        : {
+            id: "",
+            project_key: this.projectKey || this.projects[0]?.key || "",
+            prompt: "",
+            model: this.model || "",
+            reasoning_effort: this.reasoningEffort || "",
+            frequency: "daily",
+            days_of_week: [],
+            time: "09:00",
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+            enabled: true,
+          };
+    },
+
+    async saveSchedule() {
+      const draft = this.scheduleDraft;
+      await this.updateSchedule(draft.id, draft.id ? "PUT" : "POST", {
+        project_key: draft.project_key,
+        prompt: draft.prompt.trim(),
+        model: draft.model || null,
+        reasoning_effort: draft.reasoning_effort || null,
+        frequency: draft.frequency,
+        days_of_week: draft.frequency === "weekly" ? draft.days_of_week : [],
+        time: draft.time,
+        timezone: draft.timezone.trim(),
+        enabled: draft.enabled,
+      });
+    },
+
+    async updateSchedule(id, method, data) {
+      if (this.scheduleBusy) return;
+      this.scheduleBusy = true;
+      this.scheduleError = "";
+      try {
+        const path = id ? `/api/schedules/${encodeURIComponent(id)}` : "/api/schedules";
+        const result = await this.api(path, { method, body: JSON.stringify(data) });
+        if (method === "DELETE") {
+          this.schedules = this.schedules.filter((item) => item.id !== id);
+        } else if (id) {
+          this.schedules = this.schedules.map((item) => item.id === id ? result : item);
+        } else {
+          this.schedules = [result, ...this.schedules];
+        }
+        this.scheduleDraft = null;
+      } catch (error) {
+        this.scheduleError = error.details?.[0]?.msg?.replace(/^Value error, /, "") || error.message;
+      } finally {
+        this.scheduleBusy = false;
+      }
+    },
+
+    async openScheduledSession(schedule) {
+      if (schedule.project_key !== this.projectKey) await this.selectProject(schedule.project_key);
+      if (schedule.project_key !== this.projectKey) return;
+      this.$refs.schedulesDialog.close();
+      await this.selectThread(schedule.last_thread_id);
     },
 
     async loadModels() {
@@ -1432,7 +1523,7 @@ window.codexConsole = function codexConsole() {
       if (projectKey === this.projectKey && this.confirmSkillNavigation && !this.confirmSkillNavigation()) return;
       const project = this.projects.find((item) => item.key === projectKey);
       if (!project || !window.confirm(
-        `Delete project "${project.name}" and all files in:\n${project.path}\n\nThis cannot be undone.`,
+        `Delete project "${project.name}", its schedules, and all files in:\n${project.path}\n\nThis cannot be undone.`,
       )) return;
       this.projectOperationBusy = true;
       try {

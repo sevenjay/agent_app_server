@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Annotated, Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -25,6 +26,7 @@ ReasoningEffort = Literal[
 ]
 GoalObjective = Annotated[str, Field(min_length=1, max_length=200_000)]
 GoalTokenBudget = Annotated[int, Field(ge=1, le=2_000_000_000)]
+Weekday = Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 
 
 class StrictRequest(BaseModel):
@@ -145,9 +147,8 @@ class ThreadUpdate(StrictRequest):
         return value.strip() or None
 
 
-class TurnStart(StrictRequest):
+class PromptSettings(StrictRequest):
     prompt: Prompt
-    attachment_ids: AttachmentIds = Field(default_factory=list)
     model: ModelId | None = None
     reasoning_effort: ReasoningEffort | None = None
 
@@ -158,6 +159,42 @@ class TurnStart(StrictRequest):
         if not value:
             raise ValueError("prompt must not be blank")
         return value
+
+
+class TurnStart(PromptSettings):
+    attachment_ids: AttachmentIds = Field(default_factory=list)
+
+
+class ScheduleSettings(PromptSettings):
+    project_key: ProjectKey
+    frequency: Literal["daily", "weekly"]
+    days_of_week: list[Weekday] = Field(default_factory=list, max_length=7)
+    time: Annotated[str, Field(pattern=r"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$")]
+    timezone: Annotated[str, Field(min_length=1, max_length=255)]
+    enabled: bool = Field(default=True, description="Defaults to true on creation. On replacement, omission preserves the current state.")
+
+    @field_validator("timezone")
+    @classmethod
+    def validate_timezone(cls, value: str) -> str:
+        try:
+            ZoneInfo(value)
+        except (ValueError, ZoneInfoNotFoundError) as exc:
+            raise ValueError("Use a valid IANA time zone such as Asia/Taipei.") from exc
+        return value
+
+    @model_validator(mode="after")
+    def validate_repeat_days(self) -> ScheduleSettings:
+        if self.frequency == "weekly" and not self.days_of_week:
+            raise ValueError("Select at least one weekday for a weekly schedule.")
+        if self.frequency == "daily" and self.days_of_week:
+            raise ValueError("Leave days_of_week empty for a daily schedule.")
+        if len(set(self.days_of_week)) != len(self.days_of_week):
+            raise ValueError("Select each weekday only once.")
+        return self
+
+
+class ScheduleEnable(StrictRequest):
+    enabled: bool
 
 
 class TurnSteer(StrictRequest):
