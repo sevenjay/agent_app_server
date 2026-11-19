@@ -634,37 +634,37 @@ files = [
 
 [[package]]
 name = "openai-codex"
-version = "0.160.1"
+version = "0.170.0"
 description = "Python SDK for Codex"
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "openai_codex-0.160.1-py3-none-any.whl", hash = "sha256:930e46e2153c00d76ff4e88e14eb7f694949244fb4be47d84394d736709e022e"},
-    {file = "openai_codex-0.160.1.tar.gz", hash = "sha256:747036e0489cbbad730874e6d50e7a6f8d06f1f54a980a849e2e11841f888ce7"},
+    {file = "openai_codex-0.170.0-py3-none-any.whl", hash = "sha256:5f07147448c71531c853068be5cda0cb73d1775cf85e38fafc7ed28f39221ec2"},
+    {file = "openai_codex-0.170.0.tar.gz", hash = "sha256:c9c8277c692b2b02ad6ceeaa984eaf1eb5ef046343dbba9ef68ee76d4fa02941"},
 ]
 
 [package.dependencies]
-openai-codex-cli-bin = "0.160.1"
+openai-codex-cli-bin = "0.170.0"
 packaging = ">=26.2"
 pydantic = ">=2.12"
 
 [[package]]
 name = "openai-codex-cli-bin"
-version = "0.160.1"
+version = "0.170.0"
 description = "Pinned Codex CLI runtime for the Python SDK"
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "openai_codex_cli_bin-0.160.1-py3-none-macosx_10_9_x86_64.whl", hash = "sha256:e4e14fb2697b785dbba29e1a59dbb1ca4b76a345c7cd601e98710bd8c1714b44"},
-    {file = "openai_codex_cli_bin-0.160.1-py3-none-macosx_11_0_arm64.whl", hash = "sha256:f720b95c0ac10ee9273faccc55473fc5fad82d3f5175dc99dcf6706a9ff52ae4"},
-    {file = "openai_codex_cli_bin-0.160.1-py3-none-manylinux_2_17_aarch64.whl", hash = "sha256:02bb2347ac8dee3109501c14f84a9046b03ceec5f469f1b0eb1ed16fab9ea660"},
-    {file = "openai_codex_cli_bin-0.160.1-py3-none-manylinux_2_17_x86_64.whl", hash = "sha256:dafe4e4fc0e560850fca28db8cd7e3c7263e22b764d57196c4854068ad17cc30"},
-    {file = "openai_codex_cli_bin-0.160.1-py3-none-musllinux_1_1_aarch64.whl", hash = "sha256:bd9c54481060723b769abbc7dd8bfcea682d1a69704ed1cd0f9b62a299a44162"},
-    {file = "openai_codex_cli_bin-0.160.1-py3-none-musllinux_1_1_x86_64.whl", hash = "sha256:534b044238c9d139512a5c4087b93490f4dbf6a0f0d41fc773a8c23c149aae74"},
-    {file = "openai_codex_cli_bin-0.160.1-py3-none-win_amd64.whl", hash = "sha256:56621eefc6d014e2ee7a40e9e41aa5653d832e5a23b0972d516981d18e4d7c57"},
-    {file = "openai_codex_cli_bin-0.160.1-py3-none-win_arm64.whl", hash = "sha256:7b4705636b227783aa2b0f5a4ce8613cd1b25d0d32f41b055bdef20b2ecd984b"},
+    {file = "openai_codex_cli_bin-0.170.0-py3-none-macosx_10_9_x86_64.whl", hash = "sha256:f6c4d203ce82abb1ee5065aca514a20bb50192d8f29d064d40087106ca8bd637"},
+    {file = "openai_codex_cli_bin-0.170.0-py3-none-macosx_11_0_arm64.whl", hash = "sha256:a72549daa5356bd76f16fed47fdc583f32d6b0d7480f03821758e4e25c0a8e23"},
+    {file = "openai_codex_cli_bin-0.170.0-py3-none-manylinux_2_17_aarch64.whl", hash = "sha256:80bc561f95a91c27a1352da542a87fb85f0ab91d3d7f071b6584b16640f65b69"},
+    {file = "openai_codex_cli_bin-0.170.0-py3-none-manylinux_2_17_x86_64.whl", hash = "sha256:7bc46666adda8219d5f55a8978754215225a2efd0952d5bd607bf9e5397e72f9"},
+    {file = "openai_codex_cli_bin-0.170.0-py3-none-musllinux_1_1_aarch64.whl", hash = "sha256:66b83b315fc873c3306c55b4267d942d02e82884873d470c41dda4b76918e556"},
+    {file = "openai_codex_cli_bin-0.170.0-py3-none-musllinux_1_1_x86_64.whl", hash = "sha256:39ef5c0544b43bfc4faf5cc8673cc6dc8ba90c199fdaf46c27cbb3019dbf0ce0"},
+    {file = "openai_codex_cli_bin-0.170.0-py3-none-win_amd64.whl", hash = "sha256:4ee1fa2bdd9d571874023d94f9519c7b424e7e4365c5ef9c73e218e8c0119945"},
+    {file = "openai_codex_cli_bin-0.170.0-py3-none-win_arm64.whl", hash = "sha256:cf763ad265850299a0c9b99d60811a829f87c09f6403f6384768fb57b6142249"},
 ]
 
 [[package]]
